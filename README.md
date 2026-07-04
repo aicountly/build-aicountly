@@ -54,7 +54,7 @@ build-aicountly/
 │   └── deploy.md
 └── .github/workflows/
     ├── deploy-production.yml      (cPanel — mirror reach-aicountly)
-    └── publish-github-pages.yml   (gh-pages branch)
+    └── publish-github-pages.yml   (GitHub Actions Pages — upload artifact + deploy-pages)
 ```
 
 ## Safety model (Part E of the spec — enforced end-to-end)

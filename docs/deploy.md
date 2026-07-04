@@ -58,11 +58,13 @@ php spark seed:repos
 
 ## 2. Frontend: GitHub Pages (publish-github-pages.yml)
 
-- Uses `peaceiris/actions-gh-pages` to push `web/dist/` to the `gh-pages` branch
-  (same pattern as reach-aicountly).
-- Set repository secrets `VITE_API_URL` and `VITE_APP_NAME`.
-- Push to `main`, or run the workflow manually.
-- Repo **Settings → Pages → Source** = branch `gh-pages` / `(root)`.
+- Uses `actions/upload-pages-artifact` + `actions/deploy-pages` (official
+  GitHub Actions Pages flow).
+- **Settings → Pages → Build and deployment → Source = GitHub Actions.**
+- Set repository secrets `VITE_API_URL` and `VITE_APP_NAME` (optional — defaults
+  are baked into the workflow).
+- Push to `main`, or run **Publish GitHub Pages** manually.
+- Site URL: `https://aicountly.github.io/build-aicountly/` (project page).
 
 ## 3. Manual migration steps
 

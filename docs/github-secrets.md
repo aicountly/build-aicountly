@@ -21,12 +21,20 @@ path for `build.aicountly.org` when ready.
 
 ## publish-github-pages.yml (push to main / manual)
 
+Uses the official GitHub Actions Pages flow (`upload-pages-artifact` +
+`deploy-pages`). **Repo Settings → Pages → Source must be "GitHub Actions"**
+(not "Deploy from branch").
+
 | Secret | Used for | Suggested Build value |
 | --- | --- | --- |
 | `VITE_API_URL` | API base for the SPA | `https://build.aicountly.org/api/v1` |
 | `VITE_APP_NAME` | App title | `AICOUNTLY Build` |
 
-`GITHUB_TOKEN` is provided automatically by GitHub Actions.
+`GITHUB_TOKEN` is provided automatically. No SSH secrets are needed for Pages.
+
+If deploy fails with *"Deployment failed, try again later"*, re-run the
+workflow once Pages is enabled, or check that no other workflow also uploads a
+`github-pages` artifact in the same run.
 
 ## After adding secrets
 

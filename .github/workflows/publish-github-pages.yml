@@ -1,21 +1,30 @@
-name: Publish GitHub Pages (gh-pages branch)
+name: Publish GitHub Pages
+
+# Official GitHub Actions Pages deployment (upload artifact + deploy-pages).
+# Repo Settings → Pages → Source must be "GitHub Actions".
 
 on:
   push:
     branches: [main, master]
+    paths:
+      - 'web/**'
+      - '.github/workflows/publish-github-pages.yml'
   workflow_dispatch:
 
-# Does NOT use actions/deploy-pages — pushes static files to the gh-pages branch.
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
+# Cancel stale in-flight deploys — fixes "Deployment failed, try again later"
+# when multiple runs queue (actions/deploy-pages#418).
 concurrency:
-  group: publish-gh-pages-build
-  cancel-in-progress: false
+  group: pages-build
+  cancel-in-progress: true
 
 jobs:
-  publish:
-    name: Build and push to gh-pages
+  build:
+    name: Build SPA artifact
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,32 +37,43 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Build frontend for GitHub Pages
+      - name: Build frontend
         working-directory: web
         env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL }}
-          VITE_APP_NAME: ${{ secrets.VITE_APP_NAME }}
-          VITE_BASE: /${{ github.event.repository.name }}/
+          GITHUB_PAGES: 'true'
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL || 'https://build.aicountly.org/api/v1' }}
+          VITE_APP_NAME: ${{ secrets.VITE_APP_NAME || 'AICOUNTLY Build' }}
         run: |
           npm ci
           npm run build
+          test -f dist/index.html
 
-      - name: Prepare GitHub Pages artifact
+      - name: Prepare Pages artifact
         working-directory: web/dist
         run: |
           touch .nojekyll
           cp index.html 404.html
+          # Ensure deploy-pages can read every file (actions/deploy-pages#58).
+          chmod -c -R +rX .
 
-      - name: Push to gh-pages branch
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./web/dist
-          enable_jekyll: false
-          force_orphan: true
+          path: web/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
 
       - name: Done
         run: |
-          echo "Published to gh-pages branch."
-          echo "Site URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
-          echo "Ensure repo Settings → Pages → Source = Deploy from branch → gh-pages / (root)"
+          echo "Site URL: ${{ steps.deployment.outputs.page_url }}"
