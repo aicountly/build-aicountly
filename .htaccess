@@ -1,0 +1,24 @@
+# SPA fallback for the AICOUNTLY Build React app.
+# Any URL that does not resolve to a real file/dir is rewritten to /index.html
+# so react-router can handle the route. The /api/ path is served by the
+# server-php CI4 app (see server-php/.htaccess).
+
+RewriteEngine On
+RewriteBase /
+
+# Never rewrite the API path — it lives at /api/ under the same host.
+RewriteRule ^api/ - [L]
+
+# Static assets and index fall through as-is.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+RewriteRule ^ index.html [L]
+
+# Cache immutable Vite hashed assets aggressively.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(?:js|css|woff2?|png|svg|webp|jpg|jpeg|gif|ico)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+</IfModule>
