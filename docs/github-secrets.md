@@ -1,13 +1,48 @@
 # GitHub Actions secrets (Build portal)
 
-Copy the **same secret names** from the `reach-aicountly` repository into this
-repo under **Settings → Secrets and variables → Actions**. Values can stay
-identical for shared cPanel SSH credentials; update `VITE_API_URL` and deploy
-path for `build.aicountly.org` when ready.
+Secret **names** match `reach-aicountly` exactly. GitHub never exposes secret
+values via API — copy values from reach in the browser, or use the sync script
+below.
 
-## deploy-production.yml (manual workflow_dispatch)
+## Quick copy (recommended)
 
-**cPanel layout:**
+```powershell
+# 1. Log in once
+gh auth login
+
+# 2. Copy template and paste values from reach-aicountly → Settings → Secrets
+Copy-Item .github\secrets.env.example .github\secrets.local.env
+# Edit secrets.local.env — paste PROD_SFTP_*, PROD_SSH_* from reach;
+# set VITE_API_URL / SUPER_ADMIN_* for build.
+
+# 3. Push secrets to build-aicountly
+.\.github\scripts\copy-secrets-from-reach.ps1 -EnvFile .github\secrets.local.env
+```
+
+To push **placeholder** defaults first (update in GitHub UI later):
+
+```powershell
+gh auth login
+.\.github\scripts\copy-secrets-from-reach.ps1
+```
+
+## Secret list (same as reach-aicountly)
+
+| Secret | Copy from reach? | Build value (update later) |
+| --- | --- | --- |
+| `PROD_SFTP_REMOTE_ROOT` | Yes — usually identical | `public_html` |
+| `PROD_SFTP_HOST` | Yes — identical | *same as reach* |
+| `PROD_SFTP_PORT` | Yes — identical | *same as reach* |
+| `PROD_SFTP_USER` | Yes — identical | *same as reach* |
+| `PROD_SSH_PRIVATE_KEY` | Yes — identical | *same as reach* |
+| `VITE_API_URL` | No — change host | `https://build.aicountly.org/api` |
+| `VITE_APP_NAME` | No — change title | `AICOUNTLY Build` |
+| `SUPER_ADMIN_EMAIL` | Optional | `pno@aicountly.com` |
+| `SUPER_ADMIN_PASSWORD` | Set fresh | *(your password)* |
+
+`GITHUB_TOKEN` is automatic — do not create manually.
+
+## cPanel layout (deploy-production.yml)
 
 ```
 public_html/              ← web/dist/   (React SPA + .htaccess)
@@ -15,42 +50,15 @@ public_html/api/          ← server-php/ (CodeIgniter 4.6 API)
 public_html/api/.env      ← created manually on server (never deployed)
 ```
 
-Set `PROD_SFTP_REMOTE_ROOT` to **`public_html`** (same as reach-aicountly).
+## publish-github-pages.yml
 
-| Secret | Used for | Suggested Build value |
-| --- | --- | --- |
-| `PROD_SFTP_REMOTE_ROOT` | cPanel document root | `public_html` |
-| `PROD_SFTP_HOST` | cPanel SSH hostname | *copy from reach* |
-| `PROD_SFTP_PORT` | SSH port (usually `22`) | *copy from reach* |
-| `PROD_SFTP_USER` | cPanel SSH username | *copy from reach* |
-| `PROD_SSH_PRIVATE_KEY` | PEM private key for SSH | *copy from reach* |
-| `VITE_API_URL` | Frontend build + HTTP health checks | `https://build.aicountly.org/api` |
-| `VITE_APP_NAME` | Frontend title | `AICOUNTLY Build` |
-| `SUPER_ADMIN_EMAIL` | OwnerSeeder on deploy | `pno@aicountly.com` |
-| `SUPER_ADMIN_PASSWORD` | OwnerSeeder on deploy | *(set in GitHub — do not commit)* |
+Only needs `VITE_API_URL` and `VITE_APP_NAME` (same table above).
 
-## publish-github-pages.yml (push to main / manual)
-
-Uses the official GitHub Actions Pages flow (`upload-pages-artifact` +
-`deploy-pages`). **Repo Settings → Pages → Source must be "GitHub Actions"**
-(not "Deploy from branch").
-
-| Secret | Used for | Suggested Build value |
-| --- | --- | --- |
-| `VITE_API_URL` | API base for the SPA | `https://build.aicountly.org/api/v1` |
-| `VITE_APP_NAME` | App title | `AICOUNTLY Build` |
-
-`GITHUB_TOKEN` is provided automatically. No SSH secrets are needed for Pages.
-
-If deploy fails with *"Deployment failed, try again later"*, re-run the
-workflow once Pages is enabled, or check that no other workflow also uploads a
-`github-pages` artifact in the same run.
-
-## After adding secrets
+## After secrets are set
 
 1. **Production (cPanel):** Actions → **Deploy Production via SSH** → Run workflow.
 2. **GitHub Pages:** push to `main`, or run **Publish GitHub Pages** manually.
-3. In repo **Settings → Pages**, set source to branch `gh-pages` / `(root)`.
+3. Repo **Settings → Pages → Source** = **GitHub Actions**.
 
 ## Local superadmin login
 
@@ -68,5 +76,3 @@ cd server-php
 php spark migrate
 php spark db:seed OwnerSeeder
 ```
-
-Sign in at the Build portal with that email and password.
