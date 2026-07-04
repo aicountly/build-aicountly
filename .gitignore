@@ -1,0 +1,28 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+web/dist/
+web/.vite/
+
+# PHP
+server-php/vendor/
+server-php/writable/cache/*
+!server-php/writable/cache/.gitkeep
+server-php/writable/logs/*
+!server-php/writable/logs/.gitkeep
+server-php/writable/session/*
+!server-php/writable/session/.gitkeep
+server-php/writable/uploads/*
+!server-php/writable/uploads/.gitkeep
+server-php/writable/debugbar/*
+server-php/writable/migrations.lock

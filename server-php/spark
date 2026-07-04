@@ -1,0 +1,42 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * AICOUNTLY Build Portal — CodeIgniter 4.6 CLI (spark).
+ * Layout: project root = api/ on cPanel (no public/ subfolder).
+ */
+
+use CodeIgniter\Boot;
+use Config\Paths;
+
+define('SPARKED', true);
+
+if (str_starts_with(PHP_SAPI, 'cgi')) {
+    exit("The spark CLI requires php-cli, not php-cgi.\n");
+}
+
+$minPhpVersion = '8.1';
+if (version_compare(PHP_VERSION, $minPhpVersion, '<')) {
+    exit(sprintf('PHP %s+ required. Current: %s', $minPhpVersion, PHP_VERSION));
+}
+
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+
+define('FCPATH', __DIR__ . DIRECTORY_SEPARATOR);
+chdir(FCPATH);
+
+define('COMPOSER_PATH', FCPATH . 'vendor/autoload.php');
+
+if (! is_file(COMPOSER_PATH)) {
+    fwrite(STDERR, "Composer dependencies missing. Run `composer install` inside server-php/.\n");
+    exit(1);
+}
+
+require FCPATH . 'app/Config/Paths.php';
+
+$paths = new Paths();
+
+require $paths->systemDirectory . '/Boot.php';
+
+exit(Boot::bootSpark($paths));

@@ -1,0 +1,198 @@
+name: Deploy Production via SSH
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production-build
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy to cPanel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      REMOTE_ROOT: ${{ secrets.PROD_SFTP_REMOTE_ROOT }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend
+        working-directory: web
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_APP_NAME: ${{ secrets.VITE_APP_NAME }}
+        run: |
+          npm ci
+          npm run build
+          test -f dist/index.html
+          echo "Built $(find dist -type f | wc -l) files in web/dist"
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.PROD_SFTP_HOST }}
+          SSH_PORT: ${{ secrets.PROD_SFTP_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          cat >> ~/.ssh/config <<EOF
+          Host cpanel-prod
+            HostName ${SSH_HOST}
+            Port ${SSH_PORT}
+            User ${{ secrets.PROD_SFTP_USER }}
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking yes
+            RequestTTY no
+            BatchMode yes
+            ConnectTimeout 30
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            LogLevel ERROR
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Resolve deploy root on server
+        id: deploy_root
+        run: |
+          set -euo pipefail
+          echo "Secret PROD_SFTP_REMOTE_ROOT: ${REMOTE_ROOT}"
+          RESOLVED=$(ssh -T cpanel-prod "set -e
+            login_pwd=\$(pwd)
+            target='${REMOTE_ROOT}'
+            deploy_root=\"\$login_pwd\"
+            if [ -n \"\$target\" ] && [ \"\$target\" != '.' ] && [ \"\$target\" != 'auto' ] && [ -d \"\$target\" ]; then
+              deploy_root=\$(cd \"\$target\" && pwd)
+            fi
+            mkdir -p \"\$deploy_root/api/writable/\"{logs,cache,session,uploads}
+            echo \"SSH login pwd: \$login_pwd\"
+            echo \"Using deploy root: \$deploy_root\"
+            ls -la \"\$deploy_root\" | head -20
+            printf '%s' \"\$deploy_root\"
+          ")
+          echo "DEPLOY_ROOT=${RESOLVED}" >> "$GITHUB_ENV"
+          echo "Resolved deploy root: ${RESOLVED}"
+
+      - name: Deploy SPA (web/dist → document root)
+        run: |
+          set -euo pipefail
+          echo "Uploading SPA to ${DEPLOY_ROOT}..."
+          timeout 600 scp -r -F "$HOME/.ssh/config" -o BatchMode=yes \
+            web/dist/. "cpanel-prod:${DEPLOY_ROOT}/"
+          ssh -T cpanel-prod "test -f '${DEPLOY_ROOT}/index.html'"
+          echo "index.html confirmed on server"
+
+      - name: Deploy API (server-php → document root/api)
+        run: |
+          set -euo pipefail
+          echo "Packaging API..."
+          tar -C server-php \
+            --exclude='./.env' \
+            --exclude='./.git' \
+            --exclude='./vendor' \
+            --exclude='./writable/logs' \
+            --exclude='./writable/cache' \
+            --exclude='./writable/session' \
+            --exclude='./writable/uploads' \
+            -czf api.tgz .
+          echo "Uploading API to ${DEPLOY_ROOT}/api..."
+          timeout 600 scp -F "$HOME/.ssh/config" -o BatchMode=yes \
+            api.tgz "cpanel-prod:${DEPLOY_ROOT}/api.tgz"
+          ssh -T cpanel-prod "set -e
+            mkdir -p '${DEPLOY_ROOT}/api'
+            tar -xzf '${DEPLOY_ROOT}/api.tgz' -C '${DEPLOY_ROOT}/api'
+            rm -f '${DEPLOY_ROOT}/api.tgz'
+            test -f '${DEPLOY_ROOT}/api/index.php'
+            test -f '${DEPLOY_ROOT}/api/.htaccess'
+            ls -la '${DEPLOY_ROOT}/api' | head -15"
+          echo "api/index.php and api/.htaccess confirmed on server"
+
+      - name: Verify API reachable over HTTP
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        run: |
+          set -euo pipefail
+          SITE_URL="${VITE_API_URL%/}"
+          SITE_URL="${SITE_URL%/api/v1}"
+          SITE_URL="${SITE_URL%/api}"
+          API_HEALTH="${SITE_URL}/api/health"
+          echo "HTTP check: ${API_HEALTH}"
+          BODY="$(curl -sS --retry 3 --retry-delay 3 "$API_HEALTH")"
+          echo "$BODY" | head -c 400
+          echo ""
+          echo "$BODY" | grep -q 'aicountly-build-api' || {
+            echo "ERROR: /api/health returned HTML — api/ is not in the web document root Apache serves."
+            echo "Set PROD_SFTP_REMOTE_ROOT to '.' in GitHub secrets (cPanel SSH is usually chrooted to the domain folder)."
+            ssh -T cpanel-prod "echo 'Remote listing:'; ls -la '${DEPLOY_ROOT}' | head -15; ls -la '${DEPLOY_ROOT}/api' 2>/dev/null | head -10 || echo 'no api dir'"
+            exit 1
+          }
+          echo "API HTTP check OK"
+
+      - name: Install PHP dependencies, migrate, and seed superadmin
+        timeout-minutes: 15
+        env:
+          SUPER_ADMIN_EMAIL: ${{ secrets.SUPER_ADMIN_EMAIL }}
+          SUPER_ADMIN_PASSWORD: ${{ secrets.SUPER_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          escaped_email=$(printf '%s' "$SUPER_ADMIN_EMAIL" | sed "s/'/'\"'\"'/g")
+          escaped_pass=$(printf '%s' "$SUPER_ADMIN_PASSWORD" | sed "s/'/'\"'\"'/g")
+          timeout 840 ssh -T cpanel-prod bash <<REMOTE
+          set -e
+          cd '${DEPLOY_ROOT}/api'
+          if command -v composer >/dev/null 2>&1; then
+            composer install --no-dev --optimize-autoloader --no-interaction
+          elif [ -f composer.phar ]; then
+            php composer.phar install --no-dev --optimize-autoloader --no-interaction
+          else
+            echo 'composer not found on server — install dependencies manually once.'
+            exit 1
+          fi
+          php spark migrate --no-interaction
+          if [ -n '${escaped_email}' ] && [ -n '${escaped_pass}' ]; then
+            export SUPER_ADMIN_EMAIL='${escaped_email}'
+            export SUPER_ADMIN_PASSWORD='${escaped_pass}'
+            export SUPER_ADMIN_NAME='Build Superadmin'
+            php spark db:seed OwnerSeeder --no-interaction
+          else
+            echo 'SUPER_ADMIN_EMAIL / SUPER_ADMIN_PASSWORD secrets not set — skipping seed.'
+          fi
+          REMOTE
+
+      - name: Verify site and API
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        run: |
+          set -euo pipefail
+          SITE_URL="${VITE_API_URL%/}"
+          SITE_URL="${SITE_URL%/api/v1}"
+          SITE_URL="${SITE_URL%/api}"
+          echo "Checking homepage: ${SITE_URL}/"
+          HOME_BODY="$(curl -fsS --retry 3 --retry-delay 5 "${SITE_URL}/")"
+          echo "$HOME_BODY" | grep -qi 'Index of /' && {
+            echo 'ERROR: Site still shows Apache directory listing.'
+            exit 1
+          }
+          echo 'Homepage OK'
+          HEALTH_URL="${SITE_URL}/api/health"
+          echo "Checking API: ${HEALTH_URL}"
+          API_BODY="$(curl -fsS --retry 3 --retry-delay 5 "$HEALTH_URL")"
+          echo "$API_BODY" | head -c 500
+          echo ""
+          echo "$API_BODY" | grep -q 'aicountly-build-api' || {
+            echo 'ERROR: API health did not return expected JSON.'
+            exit 1
+          }
+          echo 'API health OK'
