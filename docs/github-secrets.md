@@ -7,14 +7,24 @@ path for `build.aicountly.org` when ready.
 
 ## deploy-production.yml (manual workflow_dispatch)
 
+**cPanel layout:**
+
+```
+public_html/              ← web/dist/   (React SPA + .htaccess)
+public_html/api/          ← server-php/ (CodeIgniter 4.6 API)
+public_html/api/.env      ← created manually on server (never deployed)
+```
+
+Set `PROD_SFTP_REMOTE_ROOT` to **`public_html`** (same as reach-aicountly).
+
 | Secret | Used for | Suggested Build value |
 | --- | --- | --- |
-| `PROD_SFTP_REMOTE_ROOT` | Remote document root (`.` if SSH is chrooted to the subdomain folder) | `.` or path to `build.aicountly.org` docroot |
+| `PROD_SFTP_REMOTE_ROOT` | cPanel document root | `public_html` |
 | `PROD_SFTP_HOST` | cPanel SSH hostname | *copy from reach* |
 | `PROD_SFTP_PORT` | SSH port (usually `22`) | *copy from reach* |
 | `PROD_SFTP_USER` | cPanel SSH username | *copy from reach* |
 | `PROD_SSH_PRIVATE_KEY` | PEM private key for SSH | *copy from reach* |
-| `VITE_API_URL` | Frontend build + HTTP health checks | `https://build.aicountly.org/api/v1` |
+| `VITE_API_URL` | Frontend build + HTTP health checks | `https://build.aicountly.org/api` |
 | `VITE_APP_NAME` | Frontend title | `AICOUNTLY Build` |
 | `SUPER_ADMIN_EMAIL` | OwnerSeeder on deploy | `pno@aicountly.com` |
 | `SUPER_ADMIN_PASSWORD` | OwnerSeeder on deploy | *(set in GitHub — do not commit)* |

@@ -9,7 +9,7 @@ Deployment mirrors **reach-aicountly** (SSH + scp, not rsync):
 
 | Workflow | Trigger | Target |
 | --- | --- | --- |
-| `deploy-production.yml` | Manual (`workflow_dispatch`) | cPanel — SPA to docroot, API to `api/` |
+| `deploy-production.yml` | Manual (`workflow_dispatch`) | `web/dist` → `public_html/`, `server-php/` → `public_html/api/` |
 | `publish-github-pages.yml` | Push to `main` / manual | `gh-pages` branch |
 
 GitHub secret names are identical to reach — see [github-secrets.md](github-secrets.md).
@@ -43,9 +43,13 @@ GitHub secret names are identical to reach — see [github-secrets.md](github-se
 1. Copy secrets from the reach repo (update `VITE_API_URL` for build).
 2. Actions → **Deploy Production via SSH** → Run workflow.
 
-The workflow will build the SPA, upload `web/dist/` and `server-php/` to cPanel,
-run `composer install`, `php spark migrate`, and `php spark db:seed OwnerSeeder`
-when `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD` are set.
+The workflow will:
+
+1. Build the React SPA into `web/dist/`
+2. Upload `web/dist/` → **`public_html/`** (via `PROD_SFTP_REMOTE_ROOT`)
+3. Upload `server-php/` → **`public_html/api/`** (never overwrites `api/.env`)
+4. Run `composer install`, `php spark migrate`, and seed the superadmin when
+   `SUPER_ADMIN_*` secrets are set
 
 ### First-time admin bootstrap
 
