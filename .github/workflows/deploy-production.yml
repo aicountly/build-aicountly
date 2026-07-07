@@ -50,6 +50,19 @@ jobs:
           test -f dist/.htaccess || cp public/.htaccess dist/.htaccess
           echo "Built $(find dist -type f | wc -l) files in web/dist (→ public_html)"
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, intl, curl, pgsql, pdo_pgsql
+
+      - name: Install server-php Composer dependencies (production)
+        working-directory: server-php
+        run: |
+          composer install --no-dev --no-interaction --no-progress --optimize-autoloader --prefer-dist
+          test -d vendor/codeigniter4/framework || (echo "CI4 framework missing after composer install" && exit 1)
+          echo "vendor/ ready ($(du -sh vendor | cut -f1)) — bundled into api deploy (no server composer needed)"
+
       - name: Configure SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
@@ -129,16 +142,16 @@ jobs:
       - name: Deploy API (server-php → public_html/api)
         run: |
           set -euo pipefail
-          echo "Packaging server-php/ as api/..."
+          echo "Packaging server-php/ as api/ (includes vendor/ from CI composer install)..."
           tar -C server-php \
             --exclude='./.env' \
             --exclude='./.git' \
-            --exclude='./vendor' \
             --exclude='./writable/logs' \
             --exclude='./writable/cache' \
             --exclude='./writable/session' \
             --exclude='./writable/uploads' \
             -czf api.tgz .
+          ls -lh api.tgz
           timeout 600 scp -F "$HOME/.ssh/config" -o BatchMode=yes \
             api.tgz "cpanel-prod:${DEPLOY_ROOT}/api.tgz"
           echo "Extracting into ${DEPLOY_ROOT}/api/ ..."
@@ -163,7 +176,7 @@ jobs:
             ls -la api | head -20"
           echo "server-php deployed as ${DEPLOY_ROOT}/api/"
 
-      - name: Install PHP dependencies, migrate, and seed superadmin
+      - name: Migrate database and seed superadmin
         timeout-minutes: 15
         env:
           SUPER_ADMIN_EMAIL: ${{ secrets.SUPER_ADMIN_EMAIL }}
@@ -175,15 +188,14 @@ jobs:
           timeout 840 ssh -T cpanel-prod bash <<REMOTE
           set -e
           cd '${DEPLOY_ROOT}/api'
-          if command -v composer >/dev/null 2>&1; then
-            composer install --no-dev --optimize-autoloader --no-interaction
-          elif [ -f composer.phar ]; then
-            php composer.phar install --no-dev --optimize-autoloader --no-interaction
-          else
-            echo 'composer not found on server — install dependencies manually once.'
+          test -d vendor/codeigniter4/framework || { echo 'ERROR: vendor/ missing on server — CI should bundle composer output'; exit 1; }
+          mkdir -p writable/cache writable/session writable/logs writable/uploads
+          chmod -R 775 writable/cache writable/session writable/logs writable/uploads 2>/dev/null || \
+            chmod -R 777 writable/cache writable/session writable/logs writable/uploads
+          if [ ! -f .env ]; then
+            echo 'ERROR: missing api/.env on server — create from .env.example before deploy'
             exit 1
           fi
-          test -d vendor/codeigniter4/framework || { echo 'ERROR: composer install did not create vendor/'; exit 1; }
           php spark migrate --no-interaction
           if [ -n '${escaped_email}' ] && [ -n '${escaped_pass}' ]; then
             export SUPER_ADMIN_EMAIL='${escaped_email}'

@@ -46,10 +46,10 @@ GitHub secret names are identical to reach — see [github-secrets.md](github-se
 The workflow will:
 
 1. Build the React SPA into `web/dist/`
-2. Upload `web/dist/` → **`public_html/`** (via `PROD_SFTP_REMOTE_ROOT`)
-3. Upload `server-php/` → **`public_html/api/`** (never overwrites `api/.env`)
-4. Run `composer install`, `php spark migrate`, and seed the superadmin when
-   `SUPER_ADMIN_*` secrets are set
+2. Run `composer install --no-dev` in CI (cPanel often has no global composer)
+3. Upload `web/dist/` → **`public_html/`** (via `PROD_SFTP_REMOTE_ROOT`)
+4. Upload `server-php/` **including `vendor/`** → **`public_html/api/`** (never overwrites `api/.env`)
+5. Run `php spark migrate` and seed the superadmin when `SUPER_ADMIN_*` secrets are set
 
 ### First-time admin bootstrap
 
