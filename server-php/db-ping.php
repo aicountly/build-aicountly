@@ -11,8 +11,9 @@ if (! file_exists(__DIR__ . '/vendor/autoload.php')) {
 }
 
 require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/app/Libraries/LenientDotEnv.php';
 
-(new \CodeIgniter\Config\DotEnv(__DIR__))->load();
+\App\Libraries\LenientDotEnv::load(__DIR__);
 
 $host = getenv('BUILD_DB_HOST') ?: '127.0.0.1';
 $port = (int) (getenv('BUILD_DB_PORT') ?: 5432);

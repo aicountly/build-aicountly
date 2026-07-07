@@ -14,9 +14,9 @@ if (! file_exists(__DIR__ . '/vendor/autoload.php')) {
 }
 
 require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/app/Libraries/LenientDotEnv.php';
 
-$dotEnv = new \CodeIgniter\Config\DotEnv(__DIR__);
-$dotEnv->load();
+\App\Libraries\LenientDotEnv::load(__DIR__);
 
 $required = [
     'BUILD_DB_HOST', 'BUILD_DB_PORT', 'BUILD_DB_NAME', 'BUILD_DB_USER', 'BUILD_DB_PASSWORD',

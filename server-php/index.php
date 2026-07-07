@@ -5,7 +5,7 @@
  * Deployed to cPanel public_html/api/index.php.
  */
 
-use CodeIgniter\Boot;
+use Config\ApplicationBoot;
 use Config\Paths;
 
 $minPhpVersion = '8.1';
@@ -36,6 +36,8 @@ require FCPATH . 'app/Config/Paths.php';
 
 $paths = new Paths();
 
+require FCPATH . 'app/Libraries/LenientDotEnv.php';
+require FCPATH . 'app/Config/ApplicationBoot.php';
 require $paths->systemDirectory . '/Boot.php';
 
-exit(Boot::bootWeb($paths));
+exit(ApplicationBoot::bootWeb($paths));

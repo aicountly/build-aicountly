@@ -6,7 +6,7 @@
  * Layout: project root = api/ on cPanel (no public/ subfolder).
  */
 
-use CodeIgniter\Boot;
+use Config\ApplicationBoot;
 use Config\Paths;
 
 define('SPARKED', true);
@@ -37,6 +37,8 @@ require FCPATH . 'app/Config/Paths.php';
 
 $paths = new Paths();
 
+require FCPATH . 'app/Libraries/LenientDotEnv.php';
+require FCPATH . 'app/Config/ApplicationBoot.php';
 require $paths->systemDirectory . '/Boot.php';
 
-exit(Boot::bootSpark($paths));
+exit(ApplicationBoot::bootSpark($paths));
