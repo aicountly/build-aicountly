@@ -3,6 +3,9 @@ name: Deploy Production via SSH
 # cPanel layout (mirrors reach-aicountly):
 #   web/dist/*     →  ${PROD_SFTP_REMOTE_ROOT}/     (typically public_html/)
 #   server-php/*   →  ${PROD_SFTP_REMOTE_ROOT}/api/ (CodeIgniter front controller)
+#
+# api/.env is NEVER deployed from CI and NEVER modified — existing server .env
+# is backed up before api/ is replaced and restored immediately after.
 
 on:
   workflow_dispatch:
@@ -158,6 +161,11 @@ jobs:
           ssh -T cpanel-prod "set -e
             cd '${DEPLOY_ROOT}'
             test -f api.tgz
+            PRESERVE_ENV='${DEPLOY_ROOT}/.build-api.env.preserve'
+            if [ -f api/.env ]; then
+              cp -a api/.env \"\$PRESERVE_ENV\"
+              echo 'Backed up api/.env — deploy will not modify production secrets'
+            fi
             rm -rf api.staging
             mkdir -p api.staging/writable/logs api.staging/writable/cache api.staging/writable/session api.staging/writable/uploads
             if tar -xzf api.tgz -C api.staging; then
@@ -168,8 +176,15 @@ jobs:
               echo 'ERROR: Could not extract api.tgz on server'
               exit 1
             fi
+            rm -f api.staging/.env 2>/dev/null || true
             rm -rf api
             mv api.staging api
+            if [ -f \"\$PRESERVE_ENV\" ]; then
+              cp -a \"\$PRESERVE_ENV\" api/.env
+              rm -f \"\$PRESERVE_ENV\"
+              chmod 600 api/.env 2>/dev/null || true
+              echo 'Restored api/.env unchanged — deploy did not modify .env'
+            fi
             rm -f api.tgz
             test -f api/index.php || { echo 'ERROR: api/index.php missing'; exit 1; }
             test -f api/.htaccess || { echo 'ERROR: api/.htaccess missing'; exit 1; }
@@ -196,6 +211,7 @@ jobs:
             echo 'ERROR: missing api/.env on server — create from .env.example before deploy'
             exit 1
           fi
+          echo 'api/.env present — deploy does not modify server secrets'
           php spark migrate --no-interaction
           if [ -n '${escaped_email}' ] && [ -n '${escaped_pass}' ]; then
             export SUPER_ADMIN_EMAIL='${escaped_email}'

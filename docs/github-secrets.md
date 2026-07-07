@@ -47,7 +47,7 @@ gh auth login
 ```
 public_html/              ← web/dist/   (React SPA + .htaccess)
 public_html/api/          ← server-php/ (CodeIgniter 4.6 API)
-public_html/api/.env      ← created manually on server (never deployed)
+public_html/api/.env      ← server-only; backed up + restored unchanged every deploy
 ```
 
 ## publish-github-pages.yml

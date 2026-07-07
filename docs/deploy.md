@@ -48,7 +48,9 @@ The workflow will:
 1. Build the React SPA into `web/dist/`
 2. Run `composer install --no-dev` in CI (cPanel often has no global composer)
 3. Upload `web/dist/` → **`public_html/`** (via `PROD_SFTP_REMOTE_ROOT`)
-4. Upload `server-php/` **including `vendor/`** → **`public_html/api/`** (never overwrites `api/.env`)
+4. Upload `server-php/` **including `vendor/`** → **`public_html/api/`**
+   - **Never** ships or overwrites `api/.env` — the workflow backs up the
+     existing server `.env` before replacing `api/`, then restores it unchanged.
 5. Run `php spark migrate` and seed the superadmin when `SUPER_ADMIN_*` secrets are set
 
 ### First-time admin bootstrap
