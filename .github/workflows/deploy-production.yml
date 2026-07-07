@@ -95,43 +95,14 @@ jobs:
       - name: Resolve document root (public_html)
         run: |
           set -euo pipefail
-          MARKER="build-root-$(date +%s).txt"
-          echo "$MARKER" > "$MARKER"
-          DETECTED=""
-
-          # PROD_SFTP_REMOTE_ROOT is usually "public_html" on cPanel.
-          CANDIDATES="public_html ."
-          if [ -n "${REMOTE_ROOT}" ] && [ "${REMOTE_ROOT}" != "." ] && [ "${REMOTE_ROOT}" != "auto" ] && [ "${REMOTE_ROOT}" != "public_html" ]; then
-            CANDIDATES="$CANDIDATES ${REMOTE_ROOT}"
+          ROOT="${REMOTE_ROOT:-public_html}"
+          ROOT="${ROOT%/}"
+          if [ -z "$ROOT" ] || [ "$ROOT" = "auto" ]; then
+            ROOT="public_html"
           fi
-
-          for TARGET in $CANDIDATES; do
-            echo "Probing deploy target: ${TARGET}"
-            ssh -T cpanel-prod "mkdir -p '${TARGET}'" 2>/dev/null || true
-            scp -F "$HOME/.ssh/config" -o BatchMode=yes "$MARKER" "cpanel-prod:${TARGET}/" 2>/dev/null || continue
-            if curl -fsS "https://${SITE_HOST}/${MARKER}" 2>/dev/null | grep -q "$MARKER"; then
-              DETECTED="$TARGET"
-              echo "Document root confirmed: ${TARGET} (public_html equivalent)"
-              ssh -T cpanel-prod "rm -f '${TARGET}/${MARKER}'" || true
-              break
-            fi
-            ssh -T cpanel-prod "rm -f '${TARGET}/${MARKER}'" 2>/dev/null || true
-          done
-          rm -f "$MARKER"
-
-          if [ -z "$DETECTED" ]; then
-            # Fall back to the secret value when HTTP probe fails (e.g. DNS not live yet).
-            if [ -n "${REMOTE_ROOT}" ] && [ "${REMOTE_ROOT}" != "auto" ]; then
-              DETECTED="${REMOTE_ROOT}"
-              echo "HTTP probe inconclusive — using PROD_SFTP_REMOTE_ROOT=${DETECTED}"
-            else
-              DETECTED="public_html"
-              echo "Defaulting to public_html"
-            fi
-          fi
-
-          echo "DEPLOY_ROOT=${DETECTED}" >> "$GITHUB_ENV"
-          ssh -T cpanel-prod "mkdir -p '${DETECTED}/api/writable/'{logs,cache,session,uploads}; echo 'Deploy root:' '${DETECTED}'; ls -la '${DETECTED}' | head -15"
+          echo "DEPLOY_ROOT=${ROOT}" >> "$GITHUB_ENV"
+          echo "Deploy layout: web/dist → ${ROOT}/ | server-php → ${ROOT}/api/"
+          ssh -T cpanel-prod "mkdir -p '${ROOT}/api/writable/'{logs,cache,session,uploads}; echo 'public_html:'; ls -la '${ROOT}' | head -15"
 
       - name: Deploy SPA (web/dist → public_html)
         run: |
@@ -161,7 +132,7 @@ jobs:
           ssh -T cpanel-prod "set -e
             cd '${DEPLOY_ROOT}'
             test -f api.tgz
-            PRESERVE_ENV='${DEPLOY_ROOT}/.build-api.env.preserve'
+            PRESERVE_ENV='.build-api.env.preserve'
             if [ -f api/.env ]; then
               cp -a api/.env \"\$PRESERVE_ENV\"
               echo 'Backed up api/.env — deploy will not modify production secrets'
@@ -188,6 +159,7 @@ jobs:
             rm -f api.tgz
             test -f api/index.php || { echo 'ERROR: api/index.php missing'; exit 1; }
             test -f api/.htaccess || { echo 'ERROR: api/.htaccess missing'; exit 1; }
+            test -f api/.env || { echo 'ERROR: api/.env missing after deploy — create on server before re-running'; exit 1; }
             ls -la api | head -20"
           echo "server-php deployed as ${DEPLOY_ROOT}/api/"
 
