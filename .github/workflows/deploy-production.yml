@@ -184,6 +184,7 @@ jobs:
             exit 1
           fi
           echo 'api/.env present — deploy does not modify server secrets'
+          bash scripts/cpanel-post-deploy-api.sh .
           php spark migrate --no-interaction
           if [ -n '${escaped_email}' ] && [ -n '${escaped_pass}' ]; then
             export SUPER_ADMIN_EMAIL='${escaped_email}'
