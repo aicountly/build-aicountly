@@ -73,11 +73,59 @@ class AuthController extends BaseController
         $role  = (string) ($user['role'] ?? 'super_admin');
 
         return build_json_success([
-            'id'    => (int) ($user['id']    ?? $u['id']),
-            'email' => (string) ($user['email'] ?? $u['email']),
-            'name'  => (string) ($user['name']  ?? ''),
-            'roles' => [$role],
+            'id'              => (int) ($user['id']    ?? $u['id']),
+            'email'           => (string) ($user['email'] ?? $u['email']),
+            'name'            => (string) ($user['name']  ?? ''),
+            'roles'           => [$role],
+            'controller_apps' => $this->controllerAppsForRequest(),
         ]);
+    }
+
+    public function controllerAppsLauncher(): ResponseInterface
+    {
+        $u = $this->currentUser();
+        if (! $u) {
+            return build_json_unauthorized();
+        }
+
+        $apps = $this->controllerAppsForRequest();
+        if ($apps === []) {
+            return build_json_error(
+                'Console session required for Top Controller Apps. Sign in at console.aicountly.org first.',
+                [],
+                401,
+            );
+        }
+
+        return build_json_success([
+            'apps' => $apps,
+        ]);
+    }
+
+    public function ssoLaunchUrl(): ResponseInterface
+    {
+        $u = $this->currentUser();
+        if (! $u) {
+            return build_json_unauthorized();
+        }
+
+        $appCode = strtolower(trim((string) ($this->request->getGet('app_code') ?? '')));
+        if ($appCode === '') {
+            return build_json_error('app_code query parameter is required.', ['app_code' => 'required'], 422);
+        }
+
+        $consoleToken = $this->consoleTokenFromRequest();
+        if ($consoleToken === '') {
+            return build_json_error('Console session required to launch controller apps.', [], 401);
+        }
+
+        $data = Services::consoleIdentity()->getSsoLaunchUrl($consoleToken, $appCode);
+        $redirectUrl = trim((string) ($data['redirect_url'] ?? ''));
+        if ($redirectUrl === '') {
+            return build_json_error('Console did not return a launch URL for this app.', [], 502);
+        }
+
+        return build_json_success(['redirect_url' => $redirectUrl]);
     }
 
     /**
@@ -259,12 +307,56 @@ class AuthController extends BaseController
             'token'   => $buildToken,
             'expires' => (int) env('BUILD_JWT_TTL_MINUTES', 720) * 60,
             'user'    => [
-                'id'    => (int) $user['id'],
-                'email' => $user['email'],
-                'name'  => $user['name'],
-                'roles' => $roles,
+                'id'              => (int) $user['id'],
+                'email'           => $user['email'],
+                'name'            => $user['name'],
+                'roles'           => $roles,
+                'controller_apps' => $this->normalizeLauncherApps(
+                    is_array($identity['controller_apps'] ?? null) ? $identity['controller_apps'] : [],
+                ),
             ],
         ];
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function controllerAppsForRequest(): array
+    {
+        $consoleToken = $this->consoleTokenFromRequest();
+        if ($consoleToken === '') {
+            return [];
+        }
+
+        $data = Services::consoleIdentity()->getLauncherApps($consoleToken);
+        if (! is_array($data)) {
+            return [];
+        }
+
+        return $this->normalizeLauncherApps(
+            is_array($data['apps'] ?? null) ? $data['apps'] : [],
+        );
+    }
+
+    private function consoleTokenFromRequest(): string
+    {
+        return trim((string) ($this->request->getCookie(ConsoleIdentityService::cookieName()) ?? ''));
+    }
+
+    /**
+     * @param list<array<string,mixed>> $apps
+     * @return list<array<string,mixed>>
+     */
+    private function normalizeLauncherApps(array $apps): array
+    {
+        $current = strtolower(trim((string) env('CONTROLLER_APP_CODE', 'build')));
+
+        return array_values(array_map(static function (array $app) use ($current): array {
+            $code = strtolower(trim((string) ($app['code'] ?? '')));
+            $app['is_current'] = $code === $current;
+
+            return $app;
+        }, $apps));
     }
 
     private function completeSsoInBrowser(string $buildToken): ResponseInterface

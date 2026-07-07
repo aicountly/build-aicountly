@@ -1,5 +1,6 @@
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../../lib/auth.jsx'
+import AppLauncher from './AppLauncher.jsx'
 
 const titles = [
   { path: '/',                     title: 'Build Dashboard' },
@@ -44,9 +45,12 @@ export default function Header() {
           Internal AI Development Bot — approval-gated code automation authority
         </p>
       </div>
-      <div className="hidden text-right text-xs text-neutral-500 sm:block">
-        {user?.email}
-        <div className="text-aicountly-700 font-medium">{(user?.roles || []).join(' · ')}</div>
+      <div className="flex items-center gap-3">
+        <AppLauncher />
+        <div className="hidden text-right text-xs text-neutral-500 sm:block">
+          {user?.email}
+          <div className="font-medium text-aicountly-700">{(user?.roles || []).join(' · ')}</div>
+        </div>
       </div>
     </header>
   )
