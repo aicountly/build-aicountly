@@ -14,6 +14,7 @@ const baseURL = resolveBase()
 export const api = axios.create({
   baseURL,
   timeout: 30_000,
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -46,9 +47,8 @@ api.interceptors.response.use(
     if (err.response?.status === 401) {
       const hadToken = getToken()
       setToken('')
-      const onLogin = window.location.pathname.endsWith('/login')
-      if (hadToken && !onLogin) {
-        window.location.assign('/login')
+      if (hadToken) {
+        window.location.assign('/')
       }
     }
     return Promise.reject(err)

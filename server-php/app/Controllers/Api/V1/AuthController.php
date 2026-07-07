@@ -4,53 +4,23 @@ namespace App\Controllers\Api\V1;
 
 use App\Controllers\BaseController;
 use App\Models\UsersModel;
+use App\Services\ConsoleIdentityService;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Services;
+use RuntimeException;
+use Throwable;
 
 class AuthController extends BaseController
 {
+    private const BUILD_TOKEN_STORAGE_KEY = 'build_token';
+
     public function login(): ResponseInterface
     {
-        $data = $this->jsonInput();
-        $errors = build_require_fields($data, ['email', 'password']);
-        if ($errors !== []) {
-            return build_json_error('Missing required fields.', $errors, 422);
-        }
-
-        $model = new UsersModel();
-        $user = $model->findByEmail((string) $data['email']);
-        if (! $user || $user['status'] !== 'active') {
-            return build_json_error('Invalid credentials.', [], 401);
-        }
-
-        if (! password_verify((string) $data['password'], (string) $user['password_hash'])) {
-            $model->update($user['id'], ['failed_attempts' => (int) $user['failed_attempts'] + 1]);
-            return build_json_error('Invalid credentials.', [], 401);
-        }
-
-        $model->update($user['id'], [
-            'last_login_at'   => date('Y-m-d H:i:s'),
-            'last_login_ip'   => $this->request->getIPAddress(),
-            'failed_attempts' => 0,
-        ]);
-
-        $token = Services::jwt()->issue((int) $user['id'], (string) $user['email'], [(string) ($user['role'] ?? 'super_admin')]);
-
-        Services::auditService()->log('auth.login', [
-            'actor_id'    => (int) $user['id'],
-            'actor_email' => (string) $user['email'],
-            'metadata'    => ['ip' => $this->request->getIPAddress()],
-        ]);
-
-        return build_json_success([
-            'token' => $token,
-            'user'  => [
-                'id'    => (int) $user['id'],
-                'email' => (string) $user['email'],
-                'name'  => (string) $user['name'],
-                'roles' => [(string) ($user['role'] ?? 'super_admin')],
-            ],
-        ], 'Signed in.');
+        return build_json_error(
+            'Local login is disabled. Sign in at console.aicountly.org and open Build from Top Controller Apps.',
+            [],
+            403,
+        );
     }
 
     public function refresh(): ResponseInterface
@@ -77,6 +47,7 @@ class AuthController extends BaseController
         }
 
         $fresh = Services::jwt()->issue($userId, $email, $roles);
+
         return build_json_success(['token' => $fresh, 'user' => [
             'id'    => $userId,
             'email' => $email,
@@ -99,11 +70,283 @@ class AuthController extends BaseController
         }
         $model = new UsersModel();
         $user  = $model->find($u['id']) ?? [];
+        $role  = (string) ($user['role'] ?? 'super_admin');
+
         return build_json_success([
             'id'    => (int) ($user['id']    ?? $u['id']),
             'email' => (string) ($user['email'] ?? $u['email']),
             'name'  => (string) ($user['name']  ?? ''),
-            'roles' => $u['roles'],
+            'roles' => [$role],
         ]);
+    }
+
+    /**
+     * GET /v1/auth/sso-callback?token= — browser redirect from Console (no SPA JS required).
+     */
+    public function ssoCallback(): ResponseInterface
+    {
+        try {
+            if ($fail = $this->ensureJwtConfigured()) {
+                return $this->ssoCallbackHtml('Build Portal is not configured for Console SSO yet.', 503);
+            }
+
+            $token = trim((string) ($this->request->getGet('token') ?? ''));
+            if ($token === '') {
+                return $this->ssoCallbackHtml('Missing SSO token. Open Build again from Console Top Controller Apps.', 400);
+            }
+
+            $identity = Services::consoleIdentity()->exchangeLaunchToken($token);
+            if ($identity === null) {
+                return $this->ssoCallbackHtml(
+                    'This sign-in link expired. Go back to Console and click Build again.',
+                    401,
+                );
+            }
+
+            $session = $this->buildSessionFromConsoleIdentity($identity, 'auth.controller_sso_callback');
+            if ($session instanceof ResponseInterface) {
+                $message = 'You do not have access to the Build controller app.';
+                $json = json_decode($session->getBody(), true);
+                if (is_array($json) && ! empty($json['message'])) {
+                    $message = (string) $json['message'];
+                }
+
+                return $this->ssoCallbackHtml($message, 403);
+            }
+
+            return $this->completeSsoInBrowser((string) $session['token']);
+        } catch (Throwable $e) {
+            log_message('error', 'SSO callback failed: ' . $e->getMessage());
+
+            return $this->ssoCallbackHtml('Console SSO sign-in failed. Try again from Console.', 500);
+        }
+    }
+
+    /**
+     * Exchange a Console controller SSO launch token for a Build session.
+     */
+    public function controllerSso(): ResponseInterface
+    {
+        try {
+            if ($fail = $this->ensureJwtConfigured()) {
+                return $fail;
+            }
+
+            $data  = $this->jsonInput();
+            $token = trim((string) ($data['token'] ?? ''));
+            if ($token === '') {
+                return build_json_error('token required.', ['token' => 'required'], 400);
+            }
+
+            $identity = Services::consoleIdentity()->exchangeLaunchToken($token);
+            if ($identity === null) {
+                return build_json_error('Invalid or expired Console SSO token.', [], 401);
+            }
+
+            $session = $this->buildSessionFromConsoleIdentity($identity, 'auth.controller_sso_login');
+            if ($session instanceof ResponseInterface) {
+                return $session;
+            }
+
+            return build_json_success($session, 'Signed in via Console SSO.');
+        } catch (Throwable $e) {
+            log_message('error', 'Controller SSO failed: ' . $e->getMessage());
+
+            return build_json_error('Controller SSO login failed.', [], 500);
+        }
+    }
+
+    /**
+     * Sign in using the shared Console cookie (direct visit to build.aicountly.org).
+     */
+    public function consoleSession(): ResponseInterface
+    {
+        try {
+            if ($fail = $this->ensureJwtConfigured()) {
+                return $fail;
+            }
+
+            $consoleToken = trim((string) ($this->request->getCookie(ConsoleIdentityService::cookieName()) ?? ''));
+            if ($consoleToken === '') {
+                return build_json_error('Sign in to Console first.', [], 401);
+            }
+
+            $identity = Services::consoleIdentity()->introspectSession($consoleToken);
+            if ($identity === null) {
+                return build_json_error('Console session is invalid or expired. Sign in again at Console.', [], 401);
+            }
+
+            $session = $this->buildSessionFromConsoleIdentity($identity, 'auth.console_session_login');
+            if ($session instanceof ResponseInterface) {
+                return $session;
+            }
+
+            return build_json_success($session, 'Signed in via Console session.');
+        } catch (Throwable $e) {
+            log_message('error', 'Console session login failed: ' . $e->getMessage());
+
+            return build_json_error('Console session login failed.', [], 500);
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $identity
+     * @return array<string,mixed>|ResponseInterface
+     */
+    private function buildSessionFromConsoleIdentity(array $identity, string $auditEvent): array|ResponseInterface
+    {
+        $active = (bool) ($identity['active'] ?? false);
+        $global = (bool) ($identity['global_superadmin'] ?? false);
+        if (! $active && ! $global) {
+            return build_json_error('You do not have access to the Build controller app.', [], 403);
+        }
+
+        $consoleUser = is_array($identity['user'] ?? null) ? $identity['user'] : [];
+        $email = strtolower(trim((string) ($consoleUser['email'] ?? '')));
+        $name  = trim((string) ($consoleUser['name'] ?? ''));
+        if ($email === '') {
+            return build_json_error('Console identity did not return a user email.', [], 502);
+        }
+
+        $users = new UsersModel();
+        $user  = $users->findByEmail($email);
+        $role  = 'super_admin';
+
+        if (! $user) {
+            $userId = $users->insert([
+                'email'         => $email,
+                'name'          => $name !== '' ? $name : $email,
+                'password_hash' => password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT),
+                'status'        => 'active',
+                'role'          => $role,
+            ]);
+
+            if (! $userId) {
+                return build_json_error('Could not provision Build user from Console identity.', [], 500);
+            }
+
+            $user = $users->find((int) $userId);
+        } elseif (($user['status'] ?? 'active') !== 'active') {
+            return build_json_error('Build user account is inactive.', [], 403);
+        }
+
+        $role = (string) ($user['role'] ?? $role);
+        $roles = [$role];
+
+        try {
+            $buildToken = Services::jwt()->issue((int) $user['id'], $user['email'], $roles);
+        } catch (RuntimeException $e) {
+            return build_json_error($e->getMessage(), [], 503);
+        }
+
+        $users->update($user['id'], [
+            'last_login_at'   => date('Y-m-d H:i:s'),
+            'last_login_ip'   => $this->request->getIPAddress(),
+            'failed_attempts' => 0,
+        ]);
+
+        Services::auditService()->log($auditEvent, [
+            'actor_id'    => (int) $user['id'],
+            'actor_email' => $user['email'],
+            'actor_role'  => $role,
+            'metadata'    => [
+                'console_user_id'   => (int) ($consoleUser['id'] ?? 0),
+                'global_superadmin' => $global,
+            ],
+        ]);
+
+        return [
+            'token'   => $buildToken,
+            'expires' => (int) env('BUILD_JWT_TTL_MINUTES', 720) * 60,
+            'user'    => [
+                'id'    => (int) $user['id'],
+                'email' => $user['email'],
+                'name'  => $user['name'],
+                'roles' => $roles,
+            ],
+        ];
+    }
+
+    private function completeSsoInBrowser(string $buildToken): ResponseInterface
+    {
+        $tokenJson = json_encode($buildToken, JSON_THROW_ON_ERROR | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+        $storageKey = json_encode(self::BUILD_TOKEN_STORAGE_KEY, JSON_THROW_ON_ERROR | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+        $html = <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signing in to Build Portal…</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: grid; place-items: center; min-height: 100vh; margin: 0; color: #334155; }
+  </style>
+</head>
+<body>
+  <p>Signing you in to Build Portal…</p>
+  <script>
+    try {
+      localStorage.setItem({$storageKey}, {$tokenJson});
+    } catch (e) {}
+    location.replace('/');
+  </script>
+</body>
+</html>
+HTML;
+
+        return $this->response
+            ->setStatusCode(200)
+            ->setContentType('text/html')
+            ->setBody($html);
+    }
+
+    private function ssoCallbackHtml(string $message, int $status = 400): ResponseInterface
+    {
+        $safeMessage = htmlspecialchars($message, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $consoleUrl  = 'https://console.aicountly.org';
+        $html = <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Build sign-in failed</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 48px auto; padding: 0 16px; color: #334155; }
+    .box { border: 1px solid #fecaca; background: #fef2f2; border-radius: 12px; padding: 16px; }
+    a { color: #047857; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1 style="font-size:18px;margin:0 0 8px;">Build sign-in failed</h1>
+    <p style="margin:0 0 12px;">{$safeMessage}</p>
+    <p style="margin:0;"><a href="{$consoleUrl}">Return to Console</a></p>
+  </div>
+</body>
+</html>
+HTML;
+
+        return $this->response
+            ->setStatusCode($status)
+            ->setContentType('text/html')
+            ->setBody($html);
+    }
+
+    private function ensureJwtConfigured(): ?ResponseInterface
+    {
+        $jwtSecret = (string) env('BUILD_JWT_SECRET', '');
+        if ($jwtSecret === '') {
+            $jwtSecret = (string) env('JWT_SECRET', '');
+        }
+        if ($jwtSecret === '' || strlen($jwtSecret) < 32) {
+            return build_json_error(
+                'Server misconfigured: set BUILD_JWT_SECRET (32+ chars) in server-php/.env',
+                [],
+                503,
+            );
+        }
+
+        return null;
     }
 }

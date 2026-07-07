@@ -1,48 +1,136 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { api, getToken, http, setToken, v1 } from './api'
+import { api, getToken, setToken, v1 } from './api'
+import { clearControllerSsoHash, readControllerSsoToken } from './controllerSso'
+import { redirectToConsoleLogin } from './consoleAuth.js'
 
 const AuthCtx = createContext(null)
+
+export const GATE_CONSOLE_REQUIRED = 'console_required'
+export const GATE_NO_ACCESS = 'no_access'
+export const GATE_ERROR = 'error'
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [ssoPending, setSsoPending] = useState(false)
+  const [gateReason, setGateReason] = useState(null)
+  const [gateMessage, setGateMessage] = useState('')
+
+  const applySession = useCallback((sessionData) => {
+    const token = sessionData?.token
+    if (!token) throw new Error('Session succeeded but no token was returned')
+    setToken(token)
+    setUser(sessionData.user)
+    setGateReason(null)
+    setGateMessage('')
+    return sessionData.user
+  }, [])
 
   const refresh = useCallback(async () => {
     if (!getToken()) {
       setUser(null)
-      setLoading(false)
-      return
+      return false
     }
     try {
-      const me = await http.get('/me')
-      setUser(me)
+      const { data: body } = await api.get(v1('/me'))
+      if (!body?.success) {
+        setToken('')
+        setUser(null)
+        return false
+      }
+      setUser(body.data ?? null)
+      setGateReason(null)
+      setGateMessage('')
+      return true
     } catch {
+      setToken('')
       setUser(null)
+      return false
+    }
+  }, [])
+
+  const loginWithControllerSso = useCallback(async (ssoToken) => {
+    const { data: body } = await api.post(v1('/auth/controller-sso'), { token: ssoToken })
+    if (!body?.success) throw new Error(body?.message || 'Controller SSO failed')
+    return applySession(body.data)
+  }, [applySession])
+
+  const loginWithConsoleSession = useCallback(async () => {
+    const { data: body } = await api.post(v1('/auth/console-session'), {}, { withCredentials: true })
+    if (!body?.success) throw new Error(body?.message || 'Console session sign-in failed')
+    return applySession(body.data)
+  }, [applySession])
+
+  const bootstrap = useCallback(async () => {
+    setLoading(true)
+    setGateReason(null)
+    setGateMessage('')
+
+    const ssoToken = readControllerSsoToken()
+    if (ssoToken) {
+      clearControllerSsoHash()
+      setSsoPending(true)
+      try {
+        await loginWithControllerSso(ssoToken)
+      } catch (e) {
+        setGateReason(GATE_ERROR)
+        setGateMessage(e?.response?.data?.message || e.message || 'Console SSO login failed')
+      } finally {
+        setSsoPending(false)
+        setLoading(false)
+      }
+      return
+    }
+
+    if (getToken()) {
+      const ok = await refresh()
+      if (ok) {
+        setLoading(false)
+        return
+      }
+    }
+
+    setSsoPending(true)
+    try {
+      await loginWithConsoleSession()
+    } catch (e) {
+      const status = e?.response?.status
+      const message = e?.response?.data?.message || e.message || 'Could not sign in via Console'
+      if (status === 401) {
+        setGateReason(GATE_CONSOLE_REQUIRED)
+        setGateMessage(message)
+      } else if (status === 403) {
+        setGateReason(GATE_NO_ACCESS)
+        setGateMessage(message)
+      } else {
+        setGateReason(GATE_ERROR)
+        setGateMessage(message)
+      }
     } finally {
+      setSsoPending(false)
       setLoading(false)
     }
-  }, [])
+  }, [loginWithConsoleSession, loginWithControllerSso, refresh])
 
-  useEffect(() => { refresh() }, [refresh])
+  useEffect(() => {
+    bootstrap()
+  }, [bootstrap])
 
-  const login = useCallback(async (email, password) => {
-    const { data: body } = await api.post(v1('/auth/login'), { email, password })
-    if (!body?.success) {
-      const err = new Error(body?.message || 'Login failed')
-      err.errors = body?.errors || {}
-      throw err
-    }
-    const token = body?.data?.token
-    if (!token) throw new Error('Login succeeded but no token was returned')
-    setToken(token)
-    setUser(body.data.user)
-    return body.data.user
-  }, [])
-
-  const logout = useCallback(async () => {
-    try { await http.post('/auth/logout') } catch { /* ignore */ }
+  const retryAuth = useCallback(async () => {
     setToken('')
     setUser(null)
+    await bootstrap()
+  }, [bootstrap])
+
+  const logout = useCallback(async () => {
+    try {
+      await api.post(v1('/auth/logout'))
+    } catch {
+      /* ignore */
+    }
+    setToken('')
+    setUser(null)
+    redirectToConsoleLogin()
   }, [])
 
   const hasRole = useCallback(
@@ -55,7 +143,21 @@ export function AuthProvider({ children }) {
   )
 
   return (
-    <AuthCtx.Provider value={{ user, loading, login, logout, refresh, hasRole }}>
+    <AuthCtx.Provider
+      value={{
+        user,
+        loading,
+        ssoPending,
+        gateReason,
+        gateMessage,
+        loginWithControllerSso,
+        loginWithConsoleSession,
+        logout,
+        refresh,
+        retryAuth,
+        hasRole,
+      }}
+    >
       {children}
     </AuthCtx.Provider>
   )

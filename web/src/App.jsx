@@ -1,9 +1,9 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import BuildLayout from './components/layout/BuildLayout.jsx'
 import ProtectedRoute from './auth/ProtectedRoute.jsx'
 import { useAuth } from './lib/auth.jsx'
 
-import Login from './pages/Login.jsx'
+import ControllerGate from './pages/ControllerGate.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import BotMode from './pages/BotMode.jsx'
 import ApiHealth from './pages/ApiHealth.jsx'
@@ -38,20 +38,23 @@ function Authed({ children, roles }) {
 }
 
 export default function App() {
-  const { user, loading } = useAuth()
-  const loc = useLocation()
+  const { user, loading, ssoPending } = useAuth()
 
-  if (loading) {
+  if (loading || ssoPending) {
     return (
       <div className="grid h-screen place-items-center text-sm text-neutral-500">
-        Loading Build portal…
+        {ssoPending ? 'Signing you in from Console…' : 'Loading Build portal…'}
       </div>
     )
   }
 
+  if (!user) {
+    return <ControllerGate />
+  }
+
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to={loc.state?.from || '/'} replace /> : <Login />} />
+      <Route path="/login" element={<Navigate to="/" replace />} />
 
       <Route path="/"                        element={<Authed><Dashboard /></Authed>} />
       <Route path="/bot-mode"                element={<Authed><BotMode /></Authed>} />

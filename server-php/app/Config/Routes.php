@@ -44,8 +44,11 @@ $routes->group('v1', static function ($routes) {
     // ------------------------------------------------------------------
     // Public auth endpoints.
     // ------------------------------------------------------------------
-    $routes->post('auth/login',   'Api\\V1\\AuthController::login');
-    $routes->post('auth/refresh', 'Api\\V1\\AuthController::refresh');
+    $routes->post('auth/login',           'Api\\V1\\AuthController::login');
+    $routes->post('auth/refresh',         'Api\\V1\\AuthController::refresh');
+    $routes->get('auth/sso-callback',     'Api\\V1\\AuthController::ssoCallback');
+    $routes->post('auth/controller-sso',  'Api\\V1\\AuthController::controllerSso');
+    $routes->post('auth/console-session', 'Api\\V1\\AuthController::consoleSession');
 
     // ------------------------------------------------------------------
     // Public health snapshots (safe, non-sensitive).

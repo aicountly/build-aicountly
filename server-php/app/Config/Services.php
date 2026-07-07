@@ -8,6 +8,7 @@ use App\Services\ApprovalService;
 use App\Services\AuditService;
 use App\Services\BotReportService;
 use App\Services\ConsoleClient;
+use App\Services\ConsoleIdentityService;
 use App\Services\DeploymentRequestService;
 use App\Services\DevRequestWorkflowService;
 use App\Services\FlowInboundService;
@@ -116,6 +117,14 @@ class Services extends BaseService
             return static::getSharedInstance('consoleClient') ?? static::consoleClient(false);
         }
         return new ConsoleClient();
+    }
+
+    public static function consoleIdentity(bool $getShared = true): ConsoleIdentityService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('consoleIdentity') ?? static::consoleIdentity(false);
+        }
+        return new ConsoleIdentityService();
     }
 
     public static function github(bool $getShared = true): GitHubServiceInterface
