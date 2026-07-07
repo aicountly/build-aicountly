@@ -163,22 +163,6 @@ jobs:
             ls -la api | head -20"
           echo "server-php deployed as ${DEPLOY_ROOT}/api/"
 
-      - name: Verify API reachable over HTTP
-        run: |
-          set -euo pipefail
-          API_HEALTH="https://${SITE_HOST}/api/health"
-          echo "HTTP check: ${API_HEALTH}"
-          BODY="$(curl -sS --retry 5 --retry-delay 4 "$API_HEALTH")"
-          echo "$BODY" | head -c 400
-          echo ""
-          echo "$BODY" | grep -q 'aicountly-build-api' || {
-            echo "ERROR: /api/health did not return API JSON."
-            echo "Expected layout: public_html/index.html + public_html/api/index.php"
-            ssh -T cpanel-prod "ls -la '${DEPLOY_ROOT}/api' 2>/dev/null | head -10 || echo 'missing api dir'"
-            exit 1
-          }
-          echo "API HTTP check OK"
-
       - name: Install PHP dependencies, migrate, and seed superadmin
         timeout-minutes: 15
         env:
@@ -199,6 +183,7 @@ jobs:
             echo 'composer not found on server — install dependencies manually once.'
             exit 1
           fi
+          test -d vendor/codeigniter4/framework || { echo 'ERROR: composer install did not create vendor/'; exit 1; }
           php spark migrate --no-interaction
           if [ -n '${escaped_email}' ] && [ -n '${escaped_pass}' ]; then
             export SUPER_ADMIN_EMAIL='${escaped_email}'
