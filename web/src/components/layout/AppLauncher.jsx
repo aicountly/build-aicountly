@@ -84,27 +84,25 @@ export default function AppLauncher() {
   const handleToggle = async () => {
     const next = !open
     setOpen(next)
-    if (next) {
-      setLaunchError('')
-    }
-
-    if (next && apps.length === 0) {
-      setLoading(true)
-      try {
-        const data = await controllerAccess.getLauncherApps()
-        const nextApps = data?.apps ?? []
-        setApps(nextApps)
-        await prefetchLaunchUrls(nextApps)
-      } catch {
-        setApps([])
-      } finally {
-        setLoading(false)
-      }
+    if (!next) {
       return
     }
 
-    if (next) {
-      await prefetchLaunchUrls(apps)
+    setLaunchError('')
+    setLoading(true)
+    try {
+      const data = await controllerAccess.getLauncherApps()
+      const nextApps = data?.apps ?? []
+      setApps(nextApps)
+      await prefetchLaunchUrls(nextApps)
+    } catch {
+      const fallbackApps = user?.controller_apps ?? []
+      setApps(fallbackApps)
+      if (fallbackApps.length > 0) {
+        await prefetchLaunchUrls(fallbackApps)
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
