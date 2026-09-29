@@ -2,10 +2,11 @@ name: Publish GitHub Pages
 
 # Official GitHub Actions Pages deployment (upload artifact + deploy-pages).
 # Repo Settings → Pages → Source must be "GitHub Actions".
+#
+# Manual only — Actions → Publish GitHub Pages → Run workflow. Landing a
+# change on main no longer publishes by itself.
 
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
 
 permissions:

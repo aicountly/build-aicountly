@@ -11,8 +11,26 @@ RewriteRule .* - [E=HTTP_X_WORKER_TOKEN:%{HTTP:X-Worker-Token}]
 RewriteCond %{HTTP:X-Source} .
 RewriteRule .* - [E=HTTP_X_SOURCE:%{HTTP:X-Source}]
 
-# Block direct access to sensitive paths (CodeIgniter layout)
-RewriteRule ^(app|database|writable|vendor|scripts)/ - [F,L]
+# .well-known stays reachable for ACME/AutoSSL certificate validation.
+RewriteRule ^\.well-known/ - [L]
+
+# Block direct access to sensitive paths (named explicitly; the front-controller
+# rule below already 404s any other real file or directory).
+RewriteRule ^(app|database|writable|vendor|scripts|tests|bin)/ - [F,L]
+
+# Only the front controller answers. Every other real file or directory here
+# (composer.json/.lock, spark, check-env.php, db-ping.php, a PHP error_log)
+# would otherwise be served as source, or run as PHP against the live .env.
+# check-env.php and db-ping.php are CLI tools, run over SSH, never over HTTP.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule !^(index\.php)?$ - [R=404,L]
+
+# Everything else goes to the CodeIgniter front controller. No /$1: the router
+# reads REQUEST_URI, and appending it would re-trigger the 404 rule above.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
 
 <FilesMatch "^\.env">
   <IfModule mod_authz_core.c>
@@ -20,6 +38,10 @@ RewriteRule ^(app|database|writable|vendor|scripts)/ - [F,L]
   </IfModule>
 </FilesMatch>
 
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^ index.php [QSA,L]
+# --- Refuse at any depth, inherited by nested directories ---------------------
+# PHP's error_log (DB errors, filesystem paths, stack-trace arguments) at any depth.
+RedirectMatch 404 (^|/)error_log$
+
+# Dotfiles at any depth (.env, .env.*, .git, .gitignore, .htaccess), except
+# .well-known which ACME/AutoSSL needs.
+RedirectMatch 404 /\.(?!well-known)
