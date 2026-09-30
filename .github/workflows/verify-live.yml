@@ -1,0 +1,98 @@
+# ---------------------------------------------------------------------------
+# Verify the live app, WITHOUT deploying anything
+#
+# MANUAL ONLY (workflow_dispatch). Runs the checks the deploy workflow runs
+# after a deploy, scripts/ci/post-deploy-checks.sh, against whatever is live
+# now. Nothing is built, uploaded, migrated or changed. (The deploy's login
+# POST probe is not part of it.)
+#
+# The host's anti-bot page answers some requests from GitHub's runners with a
+# 200 of its own; the checks see through it by asking again from the server
+# itself over SSH, which is why this job sets up the deploy key. With no
+# deploy there is no build to compare, so the web app is recognised by its
+# <title> rather than by the hashed entry asset of a build.
+# ---------------------------------------------------------------------------
+name: Verify live app
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which deployment to check (Build has production only)
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The same key, host pinning and cpanel-prod alias as the deploy
+      # workflow's "Configure SSH"; only the checks' retry from the server uses
+      # it.
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.PROD_SFTP_HOST }}
+          SSH_PORT: ${{ secrets.PROD_SFTP_PORT || '22' }}
+          SSH_USER: ${{ secrets.PROD_SFTP_USER }}
+        run: |
+          if [ -z "$SSH_PRIVATE_KEY" ] || [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ]; then
+            echo "::error::Set PROD_SSH_PRIVATE_KEY, PROD_SFTP_HOST and PROD_SFTP_USER in GitHub secrets."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          cat >> ~/.ssh/config <<EOF
+          Host cpanel-prod
+            HostName ${SSH_HOST}
+            Port ${SSH_PORT}
+            User ${SSH_USER}
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking yes
+            RequestTTY no
+            BatchMode yes
+            ConnectTimeout 30
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            LogLevel ERROR
+          EOF
+          chmod 600 ~/.ssh/config
+
+      # The checks ask the server itself only when the runner is shown the
+      # anti-bot page, which may not happen on this run. Prove the fallback
+      # works anyway: the key is accepted and the server has curl.
+      - name: Verify the server can retry a check
+        run: |
+          if ! ssh -T cpanel-prod 'command -v curl' > /tmp/ssh.out 2> /tmp/ssh.err; then
+            echo "::error::SSH to the server failed, or the server has no curl: when the runner is shown the anti-bot page, the checks could not ask the server instead."
+            sed 's/^/    /' /tmp/ssh.err
+            exit 1
+          fi
+          echo "SSH works; the server's curl is $(cat /tmp/ssh.out)."
+
+      - name: Run the post-deploy checks
+        env:
+          TARGET: ${{ inputs.environment }}
+          VERIFY_SSH: ssh -T cpanel-prod
+          # Nothing was deployed, so there is no build to compare with.
+          EXPECTED_ENTRY: ''
+        run: bash scripts/ci/post-deploy-checks.sh "$TARGET"
+
+      - name: Clean up SSH credentials
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/config
