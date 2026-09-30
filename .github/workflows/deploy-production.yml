@@ -195,15 +195,29 @@ jobs:
           fi
           REMOTE
 
+      # Is the live site really this build, and is its API answering? The host's anti-bot page
+      # ("One moment, please...") answers some runner requests with a 200 of its own, which a grep
+      # for "<html" accepts. The checks accept only the app's real answer, ask again from the
+      # server itself over SSH (cpanel-prod, configured above) when the runner is shown that page,
+      # and fail the deploy when neither gets it. What they assert (web entry; the API answers as
+      # Build, "misconfigured" warns only): scripts/ci/post-deploy-checks.sh.
       - name: Verify site, API, and login endpoint
+        env:
+          VERIFY_SSH: ssh -T cpanel-prod
         run: |
           set -euo pipefail
-          echo "Checking homepage (public_html/index.html)..."
-          curl -fsS "https://${SITE_HOST}/" | grep -qi '<html'
-          echo "Homepage OK"
-          echo "Checking API health (public_html/api/health)..."
-          curl -fsS "https://${SITE_HOST}/api/health" | grep -q 'aicountly-build-api'
-          echo "API health OK"
+          # The entry script's hash is unique to this build: finding it in the live index.html
+          # proves the new web build is the one being served.
+          EXPECTED_ENTRY="$(grep -o 'assets/index-[^"]*\.js' web/dist/index.html | head -n 1 || true)"
+          if [ -z "$EXPECTED_ENTRY" ]; then
+            echo "::warning::No assets/index-*.js in web/dist/index.html; the live page is checked for its <title> instead."
+          fi
+          export EXPECTED_ENTRY
+          bash scripts/ci/post-deploy-checks.sh production
+          # NOT splash-proof: this POST is made from the runner only (verify-live.sh makes GET
+          # requests, and nothing retries this one from the server). If the host's anti-bot page
+          # answers it, it fails here although the app is fine; the checks above, which got the
+          # app's real answer, tell the two cases apart.
           echo "Checking login route (expect JSON, not HTML)..."
           LOGIN_CODE="$(curl -sS -o /tmp/login.json -w '%{http_code}' \
             -X POST "https://${SITE_HOST}/api/v1/auth/login" \
