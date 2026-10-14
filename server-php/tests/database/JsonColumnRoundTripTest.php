@@ -60,8 +60,8 @@ final class JsonColumnRoundTripTest extends CIUnitTestCase
         $this->setEnv('BUILD_FLOW_INBOUND_TOKEN', self::FLOW_TOKEN);
         $this->setEnv('BUILD_FLOW_INBOUND_HMAC_SECRET', '');
         $this->setEnv('BUILD_CONSOLE_INBOUND_TOKEN', 'console-inbound-test-token');
-        // Console outbound unconfigured: ConsoleClient logs each event to
-        // build_console_syncs (a JSON-cast table) instead of calling out.
+        // Console outbound unconfigured: the central-audit outbox records each event in
+        // build_console_syncs (skipped_not_configured) instead of calling out.
         $this->setEnv('BUILD_CONSOLE_API_BASE_URL', '');
         $this->setEnv('BUILD_CONSOLE_API_TOKEN', '');
         $this->setEnv('BUILD_GITHUB_TOKEN', 'ghp-test-token');
@@ -302,11 +302,15 @@ final class JsonColumnRoundTripTest extends CIUnitTestCase
         $listed = $this->getData('v1/approvals');
         $this->assertSameDoc($approvalPayload, $listed[0]['payload']);
 
-        // Console was not configured: the outbound approval request is logged.
+        // Console was not configured: the approval.requested central-audit event (the only way an
+        // approval reaches Console) is logged with the payload intact.
         $sync = $this->getData('v1/console-syncs')[0];
         $this->assertSameDoc('skipped_not_configured', $sync['status']);
-        $this->assertSameDoc('/api/v1/portal/build/approvals', $sync['request']['path']);
-        $this->assertSameDoc($approvalPayload, $sync['request']['payload']['payload']);
+        $this->assertSameDoc('audit_event', $sync['kind']);
+        $this->assertSameDoc('/portal/audit', $sync['request']['path']);
+        $event = $sync['request']['payload']['events'][0];
+        $this->assertSameDoc('approval.requested', $event['action']);
+        $this->assertSameDoc($approvalPayload, $event['metadata']['metadata']['payload']);
 
         // Console calls back with the decision.
         $this->withHeaders(['Authorization' => 'Bearer console-inbound-test-token'])

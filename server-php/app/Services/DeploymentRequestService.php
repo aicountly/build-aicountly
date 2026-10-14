@@ -45,23 +45,13 @@ class DeploymentRequestService
             'notes'          => $notes,
         ], true);
 
+        // Reaches Console through the central audit (deployment.* is fanned out).
         Services::auditService()->log("deployment.requested.{$environment}", [
             'entity_type' => 'dev_request',
             'entity_id'   => $devRequestId,
-            'metadata'    => ['deployment_id' => $id, 'environment' => $environment],
+            'metadata'    => ['deployment_id' => $id, 'environment' => $environment, 'repo_id' => $repoId],
             'risk_level'  => $environment === 'production' ? 'high' : 'info',
         ]);
-
-        try {
-            Services::consoleClient()->sendDeploymentRequested([
-                'deployment_id'  => $id,
-                'dev_request_id' => $devRequestId,
-                'environment'    => $environment,
-                'repo_id'        => $repoId,
-            ]);
-        } catch (\Throwable $e) {
-            log_message('warning', 'Console deployment notify failed: ' . $e->getMessage());
-        }
 
         return $id;
     }
@@ -98,17 +88,6 @@ class DeploymentRequestService
             'metadata'    => ['deployment_id' => $deploymentId, 'environment' => $row['environment']],
             'risk_level'  => $row['environment'] === 'production' ? 'critical' : 'info',
         ]);
-
-        try {
-            Services::consoleClient()->sendDeploymentStatus([
-                'deployment_id' => $deploymentId,
-                'dev_request_id' => $row['dev_request_id'],
-                'environment'   => $row['environment'],
-                'status'        => 'approved',
-            ]);
-        } catch (\Throwable $e) {
-            log_message('warning', 'Console deployment status notify failed: ' . $e->getMessage());
-        }
     }
 
     public function markDeployed(int $deploymentId, ?string $providerRef = null): void

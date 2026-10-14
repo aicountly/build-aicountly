@@ -141,6 +141,34 @@ final class ConsoleAuditOutboxFlowTest extends CIUnitTestCase
         $this->assertSame(1, (int) Database::connect()->query("SELECT COUNT(*) AS n FROM build_console_syncs WHERE kind = 'audit_event'")->getRow()->n);
     }
 
+    public function testApprovalsAndDeploymentsReachConsoleOnlyThroughTheCentralAudit(): void
+    {
+        $this->setEnv('CONSOLE_API_URL', 'http://127.0.0.1:9/api');   // nothing listens: events stay queued
+        $this->setEnv('CONSOLE_API_TOKEN', 'cnnk_build');
+
+        $approvalId = \Config\Services::approvalService()->request(41, 'prod_deploy', null, ['summary' => 'ship it']);
+        \Config\Services::approvalService()->approve($approvalId, 1, 'zz-test');
+        $deploymentId = \Config\Services::deploymentRequestService()->requestStaging(41, 7, null);
+        \Config\Services::deploymentRequestService()->markApproved($deploymentId, 1);
+
+        $kinds = array_column(Database::connect()->query('SELECT DISTINCT kind FROM build_console_syncs')->getResultArray(), 'kind');
+        $this->assertSame(['audit_event'], $kinds, 'no approval_request / deployment_* calls to routes Console does not have');
+
+        $events = [];
+        foreach (Database::connect()->query("SELECT request FROM build_console_syncs WHERE kind = 'audit_event' ORDER BY id")->getResultArray() as $r) {
+            $e = json_decode((string) $r['request'], true)['payload']['events'][0];
+            $events[$e['action']] = $e;
+        }
+        $this->assertSame(['approval.requested', 'approval.approved', 'deployment.requested.staging', 'deployment.approved.staging'], array_keys($events));
+        $this->assertSame(['prod_deploy', $approvalId, ['summary' => 'ship it']],
+            [$events['approval.requested']['metadata']['metadata']['action'], $events['approval.requested']['metadata']['metadata']['approval_id'],
+             $events['approval.requested']['metadata']['metadata']['payload']]);
+        $this->assertSame([$deploymentId, 'staging', 7],
+            [$events['deployment.requested.staging']['metadata']['metadata']['deployment_id'], $events['deployment.requested.staging']['metadata']['metadata']['environment'],
+             $events['deployment.requested.staging']['metadata']['metadata']['repo_id']]);
+        $this->assertSame(['dev_request', '41'], [$events['approval.requested']['entity_type'], (string) $events['approval.requested']['entity_id']]);
+    }
+
     private function setEnv(string $key, string $value): void
     {
         putenv("{$key}={$value}");

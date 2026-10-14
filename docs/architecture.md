@@ -27,7 +27,7 @@ happens without an explicit superadmin decision recorded in `build_approvals`.
    │   GitHubServiceInterface (Live / Null)                       │
    │   AiProviderInterface (Claude / OpenAI / Aicountly / Mock)   │
    │   Playwright worker client (worker.apis.aicountly.com)       │
-   │   ConsoleClient (outbound 8 event kinds)                     │
+   │   ConsoleClient (central audit → Console /portal/audit)      │
    │   FlowInboundService (idempotent handoff)                    │
    │   SafetyGuardService (12 rules, blocks unsafe writes)        │
    └────────────┬─────────────────────────────────────────────────┘
@@ -159,7 +159,7 @@ without `old_value` was silently dropped.
 | `FlowInboundService`          | Idempotent handoff processing, dedupes on `flow_handoff_id`.       |
 | `JsonColumnRepairService`     | Unwraps double-encoded JSONB values (`spark build:repair-json`).   |
 | `PlaywrightWorkerService`     | Enqueues + completes Playwright jobs.                              |
-| `ConsoleClient`               | 8 outbound event kinds to Console.                                 |
+| `ConsoleClient`               | Central audit to Console (`ConsoleAuditOutbox`, see §Console below). |
 | `Github\*`                    | `LiveGitHubService` (REST) or `NullGitHubService` fallback.        |
 | `Ai\*`                        | `AiProviderInterface`, Mock/Claude/OpenAI/Aicountly implementations. |
 
@@ -175,3 +175,32 @@ without `old_value` was silently dropped.
 Everything sensitive lives in `server-php/.env` (see `.env.example`). Nothing
 is hardcoded, and secrets never leak to the client. Frontend only knows
 `VITE_API_URL` + `VITE_APP_NAME`.
+
+## Console: what Build sends (2026-10-14)
+
+Build sends Console **one** thing: its central audit — every `AuditService` action whose prefix is
+in `CONSOLE_FANOUT_PREFIXES` (`approval.`, `bot.`, `commit.`, `pr.`, `deployment.`, `dev_request.`,
+`auth.`, `high_risk.`), to `POST {CONSOLE_API_URL}/portal/audit` with Build's own Console key
+(capability `audit.write`), through the `build_console_syncs` outbox (`ConsoleAuditOutbox`, retried by
+`php spark console:deliver-audit`). In Console: Audit Logs, app = Build.
+
+Until 2026-10-14 `ConsoleClient` also sent eight event kinds to `/api/v1/portal/build/*`
+(`approval_request`, `bot_report_summary`, `high_risk_action_request`, `pr_created`,
+`deployment_requested`, `deployment_status_changed`, `bot_mode_status`, `health_status`). Console has
+never served those paths (no such route anywhere in its history), so each call ended as a `failed` /
+`skipped_not_configured` row and Console learnt nothing. They were **removed**, not built in Console:
+
+| Removed call | What it reported | Where it is now |
+|---|---|---|
+| approval_request | an approval Build needs | Build decides approvals itself (Approvals page, `build_approvals`); `approval.requested` / `.approved` / `.rejected` audit events (with action, approval id and the payload when ≤ 16 KB) |
+| high_risk_action_request | a high-risk override was recorded | `high_risk.override_recorded` audit event (approval id, reason) |
+| pr_created | Build opened a PR | `pr.created` audit event (PR number, URL, dev request, repo) |
+| deployment_requested / deployment_status_changed | a deployment was requested / approved | `deployment.requested.<env>` / `deployment.approved.<env>` / `deployment.deployed.<env>` audit events (deployment id, environment, repo) |
+| bot_mode_status | the bot mode changed | `bot.mode_changed` audit event (old / new mode) |
+| bot_report_summary, health_status | — | had no caller |
+
+Console's cross-portal approval queue is the Bot Orchestrator (`POST /portal/bot-approval-request`,
+`bot_portals` key) and is meant for bot actions; Build's human approvals stay in Build, as Flow's
+superadmin approvals stay in Flow. `POST /api/v1/internal/console/approvals/callback`
+(`BUILD_CONSOLE_INBOUND_TOKEN`) is kept for a Console that decides Build approvals; Console does not
+call it today.

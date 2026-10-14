@@ -2,151 +2,42 @@
 
 namespace App\Services;
 
-use App\Models\ConsoleSyncsModel;
-
 /**
- * Build -> Console outbound HTTP client. Every call is recorded in
- * build_console_syncs with request/response for observability.
+ * Build -> Console. One thing goes to Console: the central audit
+ * (POST {CONSOLE_API_URL}/portal/audit through ConsoleAuditOutbox, retried until Console has it).
  *
- * Endpoints (Part J of the spec):
- *   audit_event                POST {CONSOLE_API_URL}/portal/audit  (ConsoleAuditOutbox, retried)
- *   approval_request           POST /api/v1/portal/build/approvals
- *   bot_report_summary         POST /api/v1/portal/build/bot-reports
- *   high_risk_action_request   POST /api/v1/portal/build/high-risk
- *   pr_created                 POST /api/v1/portal/build/prs
- *   deployment_requested       POST /api/v1/portal/build/deployments
- *   deployment_status_changed  PATCH /api/v1/portal/build/deployments
- *   bot_mode_status            POST /api/v1/portal/build/bot-mode
- *   health_status              POST /api/v1/portal/build/health
+ * Build used to send eight more event kinds — approval_request, bot_report_summary,
+ * high_risk_action_request, pr_created, deployment_requested, deployment_status_changed,
+ * bot_mode_status, health_status — to /api/v1/portal/build/* on BUILD_CONSOLE_API_BASE_URL.
+ * Console has never had those routes (none in its history), so every one ended as a `failed` or
+ * `skipped_not_configured` row in build_console_syncs and Console learnt nothing. They were
+ * removed (2026-10-14) because each duplicated something Console now receives anyway:
  *
- * The paths above are canonical for Build → Console. If Console changes them,
- * only this file needs updating. When CONSOLE_API_BASE_URL is empty, every
- * call is recorded as `skipped_not_configured`.
+ *   - approvals, PRs, deployments, the high-risk override and the bot mode are decided and
+ *     recorded in Build itself (build_approvals, build_pull_requests, build_deployment_requests,
+ *     build_settings), and every one of those changes is an AuditService action whose prefix is
+ *     fanned out (approval.*, pr.*, deployment.*, high_risk.*, bot.*) — so Console's audit log
+ *     (filter app = Build) shows it, with the fields those calls carried in its metadata;
+ *   - bot_report_summary and health_status had no caller.
+ *
+ * Console's own cross-portal approval queue is the Bot Orchestrator (POST /portal/bot-approval-request,
+ * bot_portals HMAC key), which is for bot actions; Build's human approvals stay in Build. The inbound
+ * POST /api/v1/internal/console/approvals/callback remains for a Console that decides Build
+ * approvals; Console does not call it today.
  */
 class ConsoleClient
 {
-    private const TIMEOUT_SECONDS = 15;
-
-    private string $baseUrl;
-    private string $token;
-    private ConsoleSyncsModel $syncs;
-
-    public function __construct()
-    {
-        $this->baseUrl = rtrim((string) env('BUILD_CONSOLE_API_BASE_URL', ''), '/');
-        $this->token   = (string) env('BUILD_CONSOLE_API_TOKEN', '');
-        $this->syncs   = new ConsoleSyncsModel();
-    }
-
     public function isConfigured(): bool
     {
-        return $this->baseUrl !== '' && $this->token !== '';
+        return (new ConsoleAuditOutbox())->isConfigured();
     }
 
     /**
      * Central audit: POST {CONSOLE_API_URL}/portal/audit through the outbox (ConsoleAuditOutbox),
-     * not dispatch() — Console's route is /portal/audit on CONSOLE_API_URL, and an event Console
-     * could not take is retried (php spark console:deliver-audit) instead of only recorded.
+     * retried by `php spark console:deliver-audit` instead of only recorded.
      */
     public function sendAuditEvent(string $type, array $payload, ?string $externalId = null): void
     {
         (new ConsoleAuditOutbox())->record($type, $payload, $externalId);
-    }
-
-    public function sendApprovalRequest(array $payload): void
-    {
-        $this->dispatch('approval_request', 'POST', '/api/v1/portal/build/approvals', $payload);
-    }
-
-    public function sendBotReportSummary(array $payload): void
-    {
-        $this->dispatch('bot_report_summary', 'POST', '/api/v1/portal/build/bot-reports', $payload);
-    }
-
-    public function sendHighRiskActionRequest(array $payload): void
-    {
-        $this->dispatch('high_risk_action_request', 'POST', '/api/v1/portal/build/high-risk', $payload);
-    }
-
-    public function sendPrCreated(array $payload): void
-    {
-        $this->dispatch('pr_created', 'POST', '/api/v1/portal/build/prs', $payload);
-    }
-
-    public function sendDeploymentRequested(array $payload): void
-    {
-        $this->dispatch('deployment_requested', 'POST', '/api/v1/portal/build/deployments', $payload);
-    }
-
-    public function sendDeploymentStatus(array $payload): void
-    {
-        $this->dispatch('deployment_status_changed', 'PATCH', '/api/v1/portal/build/deployments', $payload);
-    }
-
-    public function sendBotModeStatus(array $payload): void
-    {
-        $this->dispatch('bot_mode_status', 'POST', '/api/v1/portal/build/bot-mode', $payload);
-    }
-
-    public function sendHealthStatus(array $payload): void
-    {
-        $this->dispatch('health_status', 'POST', '/api/v1/portal/build/health', $payload);
-    }
-
-    /** @param array<string, mixed> $payload */
-    private function dispatch(string $kind, string $method, string $path, array $payload): void
-    {
-        $requestSnapshot = [
-            'method'  => $method,
-            'path'    => $path,
-            'payload' => $payload,
-        ];
-
-        if (! $this->isConfigured()) {
-            $this->syncs->insert([
-                'kind'      => $kind,
-                'direction' => 'outbound',
-                'status'    => 'skipped_not_configured',
-                'request'   => $requestSnapshot,
-                'response'  => null,
-                'error'     => 'BUILD_CONSOLE_API_BASE_URL or BUILD_CONSOLE_API_TOKEN empty.',
-            ]);
-            return;
-        }
-
-        $url = $this->baseUrl . $path;
-        $ch  = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL            => $url,
-            CURLOPT_CUSTOMREQUEST  => $method,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
-            CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            CURLOPT_HTTPHEADER     => [
-                'Content-Type: application/json',
-                'Accept: application/json',
-                'Authorization: Bearer ' . $this->token,
-                'X-Source: ' . BUILD_PORTAL_SOURCE,
-            ],
-        ]);
-
-        $body   = curl_exec($ch);
-        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err    = curl_error($ch);
-        curl_close($ch);
-
-        $ok = $err === '' && $status >= 200 && $status < 300;
-
-        $this->syncs->insert([
-            'kind'      => $kind,
-            'direction' => 'outbound',
-            'status'    => $ok ? 'delivered' : 'failed',
-            'request'   => $requestSnapshot,
-            'response'  => [
-                'http_status' => $status,
-                'body'        => $body ? substr((string) $body, 0, 4096) : null,
-            ],
-            'error'     => $err !== '' ? $err : ($ok ? null : ('http_status=' . $status)),
-        ]);
     }
 }
