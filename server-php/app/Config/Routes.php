@@ -24,6 +24,9 @@ $routes->get('/health', static function () {
     $jwtOk     = $jwtSecret !== '' && strlen($jwtSecret) >= 32;
     $vaultKey  = (string) env('BUILD_VAULT_KEY', '');
     $vaultOk   = $vaultKey !== '' && strlen($vaultKey) === 64;
+    // Token refresh re-checks Build roles with Console (required in production). Reported only:
+    // configuration, not the deploy (live verification fails on it instead).
+    $roleSync  = trim((string) env('CONSOLE_API_URL', '')) !== '' && trim((string) env('CONSOLE_API_TOKEN', '')) !== '';
 
     return service('response')->setJSON([
         'success' => $jwtOk && $vaultOk,
@@ -34,6 +37,7 @@ $routes->get('/health', static function () {
             'checks'    => [
                 'jwt_secret' => $jwtOk  ? 'ok' : 'missing or too short (need 32+ chars in server-php/.env)',
                 'vault_key'  => $vaultOk ? 'ok' : 'missing or wrong length (need 64 hex chars in server-php/.env)',
+                'console_role_sync' => $roleSync ? 'ok' : 'CONSOLE_API_URL / CONSOLE_API_TOKEN not set — token refresh cannot re-check roles with Console (required in production)',
             ],
         ],
         'errors'  => [],
