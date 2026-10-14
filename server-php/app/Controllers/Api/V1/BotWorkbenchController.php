@@ -81,10 +81,10 @@ class BotWorkbenchController extends BaseController
             'ai_provider'     => $provider->name(),
             'ai_model'        => (string) ($plan['raw']['model'] ?? ''),
             'summary'         => (string) ($plan['summary'] ?? ''),
-            'plan'            => json_encode($plan['steps']            ?? []),
-            'test_plan'       => json_encode($plan['test_plan']        ?? []),
+            'plan'            => $plan['steps']            ?? [],
+            'test_plan'       => $plan['test_plan']        ?? [],
             'risk_level'      => (string) ($plan['risk_level']         ?? 'medium'),
-            'files_estimated' => json_encode($plan['files_estimated']  ?? []),
+            'files_estimated' => $plan['files_estimated']  ?? [],
             'tokens_used'     => (int) ($plan['tokens_used'] ?? 0),
             'created_by_bot'  => true,
         ], true);

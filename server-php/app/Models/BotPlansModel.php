@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class BotPlansModel extends Model
+class BotPlansModel extends BuildModel
 {
     protected $table         = 'build_bot_plans';
     protected $primaryKey    = 'id';
@@ -21,9 +19,9 @@ class BotPlansModel extends Model
     ];
 
     protected array $casts = [
-        'plan'            => 'json-array',
-        'test_plan'       => 'json-array',
-        'files_estimated' => 'json-array',
+        'plan'            => '?json-array',
+        'test_plan'       => '?json-array',
+        'files_estimated' => '?json-array',
     ];
 
     public function latestForRequest(int $devRequestId): ?array

@@ -57,11 +57,12 @@ class AuditService
                 'entity_type' => $opts['entity_type'] ?? null,
                 'entity_id'   => isset($opts['entity_id']) ? (string) $opts['entity_id'] : null,
                 'risk_level'  => $opts['risk_level']  ?? 'info',
-                'old_value'   => isset($opts['old_value']) ? json_encode($opts['old_value']) : null,
-                'new_value'   => isset($opts['new_value']) ? json_encode($opts['new_value']) : null,
+                // JSON-cast fields: pass the values, AuditLogsModel encodes them.
+                'old_value'   => $opts['old_value'] ?? null,
+                'new_value'   => $opts['new_value'] ?? null,
                 'ip_address'  => method_exists($req, 'getIPAddress') ? $req->getIPAddress() : null,
                 'user_agent'  => method_exists($req, 'getUserAgent') ? substr((string) $req->getUserAgent(), 0, 510) : null,
-                'metadata'    => isset($opts['metadata']) ? json_encode($opts['metadata']) : null,
+                'metadata'    => $opts['metadata'] ?? null,
                 'created_at'  => date('Y-m-d H:i:s'),
             ];
 

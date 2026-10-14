@@ -57,6 +57,21 @@ The workflow will:
      existing server `.env` before replacing `api/`, then restores it unchanged.
 5. Run `php spark migrate` and seed the superadmin when `SUPER_ADMIN_*` secrets are set
 
+### One-off after deploying the JSON double-encoding fix (October 2026)
+
+Rows written by earlier releases may hold double-encoded JSON. The API reads
+them correctly already; to repair the stored values, on the server:
+
+```
+cd public_html/api
+php spark build:repair-json            # dry run — lists table.column counts
+php spark build:repair-json --apply    # rewrites only those values; idempotent
+```
+
+Take the usual DB backup first; the command touches only JSONB values that
+are a string wrapping JSON text. Re-running it reports `0`.
+See [architecture.md § JSONB columns](architecture.md#jsonb-columns).
+
 ### First-time admin bootstrap
 
 On the server, after the first deploy:

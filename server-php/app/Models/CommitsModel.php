@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class CommitsModel extends Model
+class CommitsModel extends BuildModel
 {
     protected $table         = 'build_commits';
     protected $primaryKey    = 'id';
@@ -20,5 +18,5 @@ class CommitsModel extends Model
         'approved_by', 'approved_at', 'error',
     ];
 
-    protected array $casts = ['diff_summary' => 'json-array'];
+    protected array $casts = ['diff_summary' => '?json-array'];
 }

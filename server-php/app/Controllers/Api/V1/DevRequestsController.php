@@ -77,10 +77,15 @@ class DevRequestsController extends BaseController
                     'files_likely_affected','code_summary','files_changed_summary',
                     'commit_hash','pr_url','deployment_status','metadata'];
         $patch = array_intersect_key($data, array_flip($allowed));
+        // JSON fields take arrays (or null); DevRequestsModel's casts encode them.
+        $jsonErrors = [];
         foreach (['files_likely_affected','files_changed_summary','metadata'] as $j) {
-            if (isset($patch[$j]) && is_array($patch[$j])) {
-                $patch[$j] = json_encode($patch[$j]);
+            if (array_key_exists($j, $patch) && $patch[$j] !== null && ! is_array($patch[$j])) {
+                $jsonErrors[$j] = 'must be an array, an object or null';
             }
+        }
+        if ($jsonErrors !== []) {
+            return build_json_error('Invalid fields.', $jsonErrors, 422);
         }
         if ($patch !== []) {
             $model->update($id, $patch);

@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class ApprovalsModel extends Model
+class ApprovalsModel extends BuildModel
 {
     protected $table         = 'build_approvals';
     protected $primaryKey    = 'id';
@@ -19,7 +17,7 @@ class ApprovalsModel extends Model
         'payload', 'requester_id', 'decided_by', 'decided_at', 'console_ref',
     ];
 
-    protected array $casts = ['payload' => 'json-array'];
+    protected array $casts = ['payload' => '?json-array'];
 
     public const ACTIONS = ['code', 'commit', 'pr', 'staging_deploy', 'prod_deploy', 'high_risk_override'];
 

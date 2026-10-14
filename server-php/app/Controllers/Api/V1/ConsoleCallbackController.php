@@ -56,8 +56,8 @@ class ConsoleCallbackController extends BaseController
             'entity_type' => $approval['entity_type'],
             'entity_id'   => $approval['entity_id'],
             'status'      => 'delivered',
-            'request'     => json_encode($payload),
-            'response'    => json_encode(['ok' => true]),
+            'request'     => $payload,
+            'response'    => ['ok' => true],
         ]);
 
         Services::auditService()->log("approval.callback.{$decision}", [

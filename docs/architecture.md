@@ -109,6 +109,44 @@ All tables are prefixed `build_`. Highlights:
 - `build_github_activity`, `build_console_syncs`, `build_ai_provider_calls`,
   `build_audit_logs` — everything the bot does is auditable.
 
+### JSONB columns
+
+Every JSONB column is declared on its model as a cast — `?json-array` when the
+column is nullable, `json-array` for `build_flow_handoffs.raw_payload` (NOT
+NULL) — and the model extends `App\Models\BuildModel`. **Write PHP arrays to
+these fields, never `json_encode()` output**: the cast encodes once on write
+and decodes on read.
+
+Until October 2026 several writers (`FlowInboundService`, `ApprovalService`,
+`TestRunnerController`, `LiveGitHubService`, `AuditService`, `ConsoleClient`,
+`DevRequestWorkflowService`, `BotReportService`, `PlaywrightWorkerService`,
+`BotWorkbenchController`, `ConsoleCallbackController`,
+`DevRequestsController::update`, `SettingsModel`) did encode first, so the cast
+encoded again and the column held a JSON *string* wrapping the document.
+CodeIgniter's `JsonCast::get()` then returned a string where it must return an
+array and the request failed with HTTP 500 — a valid Flow handoff
+(`POST /api/v1/tasks`) among them. The casts were also non-nullable, so any row
+with a NULL JSON column (most of them) failed to load, and every audit entry
+without `old_value` was silently dropped.
+
+- **Reads are tolerant.** `BuildModel` swaps CodeIgniter's `json` cast handler
+  for `App\Models\Cast\TolerantJsonCast`, which unwraps string-wrapped JSON
+  (up to four layers) and passes JSON scalars through (`build_settings` stores
+  values such as `"confirm"`). As a backstop, a `json-array` field handed a
+  string that is itself a JSON object/array stores the document instead of
+  encoding it again, and logs a warning.
+- **Stored rows are repaired by command**, not by a migration:
+  `php spark build:repair-json` (dry run) then `php spark build:repair-json --apply`.
+  It only rewrites values whose JSONB type is `string` and whose text is itself
+  JSON (`{…}`, `[…]` or `"…"`), re-checks each value as it updates it, and is a
+  no-op when run again. Bare numbers/booleans stored as strings (`"5"`, `"true"`)
+  are left alone because they are ambiguous. It is a command rather than a
+  migration so an operator sees the dry-run counts before audit data is
+  rewritten; nothing depends on it running, because the reads already cope.
+- `TolerantJsonCastTest` (unit) fails if a model with a JSON cast does not
+  extend `BuildModel`, uses a non-nullable cast for a nullable column, or is
+  missing from the repair command.
+
 ## 5. Services (`server-php/app/Services`)
 
 | Service                       | Responsibility                                                     |
@@ -119,6 +157,7 @@ All tables are prefixed `build_`. Highlights:
 | `DeploymentRequestService`    | Staging + production deployment tracking (separate approvals).     |
 | `BotReportService`            | Persists the full "what the bot did" report.                       |
 | `FlowInboundService`          | Idempotent handoff processing, dedupes on `flow_handoff_id`.       |
+| `JsonColumnRepairService`     | Unwraps double-encoded JSONB values (`spark build:repair-json`).   |
 | `PlaywrightWorkerService`     | Enqueues + completes Playwright jobs.                              |
 | `ConsoleClient`               | 8 outbound event kinds to Console.                                 |
 | `Github\*`                    | `LiveGitHubService` (REST) or `NullGitHubService` fallback.        |

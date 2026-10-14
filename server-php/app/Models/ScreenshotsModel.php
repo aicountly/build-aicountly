@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class ScreenshotsModel extends Model
+class ScreenshotsModel extends BuildModel
 {
     protected $table         = 'build_screenshots';
     protected $primaryKey    = 'id';
@@ -17,5 +15,5 @@ class ScreenshotsModel extends Model
         'width', 'height', 'meta', 'created_at',
     ];
 
-    protected array $casts = ['meta' => 'json-array'];
+    protected array $casts = ['meta' => '?json-array'];
 }

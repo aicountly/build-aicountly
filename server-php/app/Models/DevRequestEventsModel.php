@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class DevRequestEventsModel extends Model
+class DevRequestEventsModel extends BuildModel
 {
     protected $table         = 'build_dev_request_events';
     protected $primaryKey    = 'id';
@@ -16,7 +14,7 @@ class DevRequestEventsModel extends Model
         'event', 'from_status', 'to_status', 'note', 'payload', 'created_at',
     ];
 
-    protected array $casts = ['payload' => 'json-array'];
+    protected array $casts = ['payload' => '?json-array'];
 
     public function forRequest(int $devRequestId): array
     {

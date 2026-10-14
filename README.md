@@ -130,13 +130,30 @@ Visit http://localhost:5173 and sign in with the seeded superadmin credentials.
 
 ```bash
 cd server-php
-vendor/bin/phpunit --testsuite unit     # role policy + Console user-access client (HTTP stubbed)
+vendor/bin/phpunit --testsuite unit     # role policy, Console user-access client (HTTP stubbed), JSON cast
 
-# + database suite: SSO sign-in / refresh / JwtFilter over the CI4 router.
+# + database suite over the CI4 router: SSO sign-in / refresh / JwtFilter, and
+# JSONB round-trips (Flow handoff POST /v1/tasks, approvals + Console callback,
+# test runner, GitHub activity with HTTP stubbed, Playwright results, settings,
+# repair of double-encoded rows).
 # Migrates and WIPES the target database — use a throwaway one.
 BUILD_RUN_DB_TESTS=1 database_tests_hostname=127.0.0.1 database_tests_database=build_test \
   database_tests_username=postgres database_tests_password=postgres vendor/bin/phpunit
 ```
+
+### Repairing double-encoded JSON
+
+Releases before October 2026 stored some JSONB values twice-encoded (a JSON
+string wrapping the document), which made a valid Flow handoff return 500. The
+API now reads those rows correctly; to clean the stored data:
+
+```bash
+cd server-php
+php spark build:repair-json            # dry run: counts per table.column
+php spark build:repair-json --apply    # rewrite them; safe to re-run
+```
+
+Details: [architecture.md § JSONB columns](docs/architecture.md#jsonb-columns).
 
 ## Documentation
 

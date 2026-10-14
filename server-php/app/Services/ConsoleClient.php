@@ -107,7 +107,7 @@ class ConsoleClient
                 'kind'      => $kind,
                 'direction' => 'outbound',
                 'status'    => 'skipped_not_configured',
-                'request'   => json_encode($requestSnapshot),
+                'request'   => $requestSnapshot,
                 'response'  => null,
                 'error'     => 'BUILD_CONSOLE_API_BASE_URL or BUILD_CONSOLE_API_TOKEN empty.',
             ]);
@@ -141,11 +141,11 @@ class ConsoleClient
             'kind'      => $kind,
             'direction' => 'outbound',
             'status'    => $ok ? 'delivered' : 'failed',
-            'request'   => json_encode($requestSnapshot),
-            'response'  => json_encode([
+            'request'   => $requestSnapshot,
+            'response'  => [
                 'http_status' => $status,
                 'body'        => $body ? substr((string) $body, 0, 4096) : null,
-            ]),
+            ],
             'error'     => $err !== '' ? $err : ($ok ? null : ('http_status=' . $status)),
         ]);
     }

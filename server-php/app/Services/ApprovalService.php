@@ -38,7 +38,7 @@ class ApprovalService
             'entity_id'    => $devRequestId,
             'action'       => $action,
             'status'       => 'pending',
-            'payload'      => json_encode($payload),
+            'payload'      => $payload,
             'requester_id' => $requesterId,
         ], true);
 

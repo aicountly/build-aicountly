@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class CodeTasksModel extends Model
+class CodeTasksModel extends BuildModel
 {
     protected $table         = 'build_code_tasks';
     protected $primaryKey    = 'id';
@@ -20,8 +18,8 @@ class CodeTasksModel extends Model
     ];
 
     protected array $casts = [
-        'payload' => 'json-array',
-        'result'  => 'json-array',
+        'payload' => '?json-array',
+        'result'  => '?json-array',
     ];
 
     public const DESTRUCTIVE_KINDS = ['file_delete', 'branch_delete', 'force_push'];

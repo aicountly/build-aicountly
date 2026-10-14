@@ -81,7 +81,7 @@ class DevRequestWorkflowService
             'from_status'    => $from,
             'to_status'      => $toStatus,
             'note'           => $opts['note'] ?? null,
-            'payload'        => isset($opts['payload']) ? json_encode($opts['payload']) : null,
+            'payload'        => $opts['payload'] ?? null,
             'created_at'     => date('Y-m-d H:i:s'),
         ]);
 
@@ -116,7 +116,7 @@ class DevRequestWorkflowService
             'actor_kind'     => $actorKind,
             'event'          => $event,
             'note'           => $note,
-            'payload'        => $payload ? json_encode($payload) : null,
+            'payload'        => $payload ?: null,
             'created_at'     => date('Y-m-d H:i:s'),
         ]);
     }

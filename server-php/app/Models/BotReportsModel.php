@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class BotReportsModel extends Model
+class BotReportsModel extends BuildModel
 {
     protected $table         = 'build_bot_reports';
     protected $primaryKey    = 'id';
@@ -24,16 +22,16 @@ class BotReportsModel extends Model
     ];
 
     protected array $casts = [
-        'files_accessed'      => 'json-array',
-        'ui_screenshots'      => 'json-array',
-        'plan'                => 'json-array',
-        'code_changes'        => 'json-array',
-        'tests_run'           => 'json-array',
-        'errors'              => 'json-array',
-        'approval_history'    => 'json-array',
-        'commit_details'      => 'json-array',
-        'pr_details'          => 'json-array',
-        'deployment_details'  => 'json-array',
-        'raw_metadata'        => 'json-array',
+        'files_accessed'      => '?json-array',
+        'ui_screenshots'      => '?json-array',
+        'plan'                => '?json-array',
+        'code_changes'        => '?json-array',
+        'tests_run'           => '?json-array',
+        'errors'              => '?json-array',
+        'approval_history'    => '?json-array',
+        'commit_details'      => '?json-array',
+        'pr_details'          => '?json-array',
+        'deployment_details'  => '?json-array',
+        'raw_metadata'        => '?json-array',
     ];
 }

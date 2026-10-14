@@ -64,7 +64,7 @@ class PlaywrightWorkerService
             'kind'           => $kind,
             'target_url'     => $targetUrl,
             'status'         => 'queued',
-            'request'        => json_encode($requestPayload),
+            'request'        => $requestPayload,
         ], true);
 
         if (! $this->isConfigured()) {
@@ -107,7 +107,7 @@ class PlaywrightWorkerService
 
         $this->jobs->update($jobId, [
             'status'       => $status,
-            'response'     => json_encode($result),
+            'response'     => $result,
             'completed_at' => date('Y-m-d H:i:s'),
             'error'        => $status === 'failed' ? substr((string) ($result['error'] ?? ''), 0, 4096) : null,
         ]);
@@ -125,7 +125,7 @@ class PlaywrightWorkerService
                 'worker_job_id'     => $shot['worker_job_id'] ?? ($job['worker_ref'] ?? null),
                 'width'             => isset($shot['width'])  ? (int) $shot['width']  : null,
                 'height'            => isset($shot['height']) ? (int) $shot['height'] : null,
-                'meta'              => isset($shot['meta']) ? json_encode($shot['meta']) : null,
+                'meta'              => $shot['meta'] ?? null,
                 'created_at'        => date('Y-m-d H:i:s'),
             ]);
         }
