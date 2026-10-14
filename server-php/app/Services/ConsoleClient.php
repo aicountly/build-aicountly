@@ -9,7 +9,7 @@ use App\Models\ConsoleSyncsModel;
  * build_console_syncs with request/response for observability.
  *
  * Endpoints (Part J of the spec):
- *   audit_event                POST /api/v1/portal/audit
+ *   audit_event                POST {CONSOLE_API_URL}/portal/audit  (ConsoleAuditOutbox, retried)
  *   approval_request           POST /api/v1/portal/build/approvals
  *   bot_report_summary         POST /api/v1/portal/build/bot-reports
  *   high_risk_action_request   POST /api/v1/portal/build/high-risk
@@ -43,14 +43,14 @@ class ConsoleClient
         return $this->baseUrl !== '' && $this->token !== '';
     }
 
-    public function sendAuditEvent(string $type, array $payload): void
+    /**
+     * Central audit: POST {CONSOLE_API_URL}/portal/audit through the outbox (ConsoleAuditOutbox),
+     * not dispatch() — Console's route is /portal/audit on CONSOLE_API_URL, and an event Console
+     * could not take is retried (php spark console:deliver-audit) instead of only recorded.
+     */
+    public function sendAuditEvent(string $type, array $payload, ?string $externalId = null): void
     {
-        $this->dispatch('audit_event', 'POST', '/api/v1/portal/audit', [
-            'source'    => BUILD_PORTAL_SOURCE,
-            'type'      => $type,
-            'payload'   => $payload,
-            'timestamp' => gmdate('c'),
-        ]);
+        (new ConsoleAuditOutbox())->record($type, $payload, $externalId);
     }
 
     public function sendApprovalRequest(array $payload): void

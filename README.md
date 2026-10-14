@@ -101,7 +101,8 @@ results) use their own bearer tokens and are unaffected.
 |-----------|----------|------|---------|
 | Flow → Build | `POST /api/v1/tasks` **and** `POST /api/v1/internal/flow/build-task` | `Authorization: Bearer FLOW_INBOUND_TOKEN` | Handoff of approved bug/feature (dedup on `flow_handoff_id`) |
 | Console → Build | `POST /api/v1/internal/console/approvals/callback` | `Authorization: Bearer CONSOLE_INBOUND_TOKEN` | Approval decisions replayed into `build_approvals` |
-| Build → Console | 8 event kinds via `CONSOLE_API_BASE_URL` | `Authorization: Bearer CONSOLE_API_TOKEN`, `X-Source: build.aicountly.org` | approval_request, audit_event, bot_report_summary, high_risk_action_request, pr_created, deployment_requested, deployment_status_changed, bot_mode_status, health_status |
+| Build → Console (central audit) | `POST {CONSOLE_API_URL}/portal/audit` | `Authorization: Bearer CONSOLE_API_TOKEN` (Build's own Console key, capability `audit.write`) | audit_event: every `AuditService` action under `CONSOLE_FANOUT_PREFIXES`, sent through the `build_console_syncs` outbox (`external_id` `build:audit_logs:<id>`, Console de-duplicates on it), retried by `php spark console:deliver-audit` (cron every 5 min) until Console has it |
+| Build → Console | 8 event kinds via `BUILD_CONSOLE_API_BASE_URL` | `Authorization: Bearer BUILD_CONSOLE_API_TOKEN`, `X-Source: build.aicountly.org` | approval_request, bot_report_summary, high_risk_action_request, pr_created, deployment_requested, deployment_status_changed, bot_mode_status, health_status (Console has no `/api/v1/portal/build/*` routes yet; each attempt is recorded in `build_console_syncs`) |
 | Build → Worker | `POST {WORKER_BASE_URL}/api/playwright/*` | `Authorization: Bearer WORKER_API_TOKEN` | Screenshot / UI inspection / smoke navigation / visual evidence |
 | Worker → Build | `POST /api/v1/internal/worker/results` | `X-Worker-Token: WORKER_API_TOKEN` | Playwright job results returned to portal |
 

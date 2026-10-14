@@ -7,7 +7,8 @@ use Config\Services;
 
 /**
  * Append-only audit log writer. Every mutating action must call log().
- * Optionally fans out to Console for the 8 event kinds listed in Part J.
+ * Fans the CONSOLE_FANOUT_PREFIXES actions out to Console's central audit through the
+ * outbox (ConsoleAuditOutbox — retried until Console has them).
  */
 class AuditService
 {
@@ -19,8 +20,9 @@ class AuditService
         'pr.',
         'deployment.',
         'dev_request.',
-        'auth.login',
-        'auth.logout',
+        // Every auth.* event: sign-ins are auth.controller_sso_login / auth.controller_sso_callback /
+        // auth.console_session_login (never plain auth.login), plus logout, refresh and access denials.
+        'auth.',
         'high_risk.',
     ];
 
@@ -66,10 +68,11 @@ class AuditService
                 'created_at'  => date('Y-m-d H:i:s'),
             ];
 
-            $this->model->insert($row);
+            $auditId = $this->model->insert($row);
 
             if ($this->shouldFanOut($action)) {
                 try {
+                    // external_id = this build_audit_logs row: Console stores it once however often it is resent.
                     Services::consoleClient()->sendAuditEvent('build.' . $action, [
                         'action'      => $action,
                         'entity_type' => $row['entity_type'],
@@ -77,7 +80,12 @@ class AuditService
                         'risk_level'  => $row['risk_level'],
                         'actor_id'    => $actorId,
                         'actor_email' => $actorEmail,
-                    ]);
+                        'old_value'   => $row['old_value'],
+                        'new_value'   => $row['new_value'],
+                        'ip_address'  => $row['ip_address'],
+                        'user_agent'  => $row['user_agent'],
+                        'metadata'    => $row['metadata'],
+                    ], $auditId ? 'build:audit_logs:' . $auditId : null);
                 } catch (\Throwable $e) {
                     log_message('warning', 'ConsoleClient fanout failed for ' . $action . ': ' . $e->getMessage());
                 }
