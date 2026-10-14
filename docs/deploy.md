@@ -32,6 +32,10 @@ GitHub secret names are identical to reach — see [github-secrets.md](github-se
   - `BUILD_FLOW_INBOUND_TOKEN`, `BUILD_FLOW_HMAC_SECRET` — from Flow.
   - `BUILD_CONSOLE_INBOUND_TOKEN`, `BUILD_CONSOLE_OUTBOUND_URL`,
     `BUILD_CONSOLE_OUTBOUND_TOKEN` — from Console.
+  - `CONSOLE_API_URL`, `CONTROLLER_APP_CODE=build` and **`CONSOLE_API_TOKEN`**
+    (a Console service token with capability `staff.roles`). Required in
+    production: Build takes staff roles from Console and re-checks them on
+    every token refresh — see [architecture.md §2](architecture.md#2-staff-sign-in-and-roles-console).
   - `BUILD_OWNER_EMAIL`, `BUILD_OWNER_NAME`, `BUILD_OWNER_PASSWORD` (or
     `SUPER_ADMIN_*` — same as GitHub secrets; default email `pno@aicountly.com`).
 - Add GitHub Actions secrets — **same names as reach-aicountly** (see

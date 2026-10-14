@@ -38,25 +38,58 @@ happens without an explicit superadmin decision recorded in `build_approvals`.
                 └──► console-inbound / flow-inbound
 ```
 
-## 2. Independent superadmin auth
+## 2. Staff sign-in and roles (Console)
 
-Build does **not** use `my.aicountly.com` login. It has its own JWT-based
-superadmin auth backed by `build_users`:
+Build does **not** use `my.aicountly.com` login, and local password login is
+disabled. Console (`console.aicountly.org`) is the identity provider **and**
+the source of staff roles. Build keeps a `build_users` row per staff member
+only to hold the role Console last assigned.
 
-- Owner is seeded from `BUILD_OWNER_EMAIL` + `BUILD_OWNER_PASSWORD_HASH`
-  via `spark seed:owner`.
-- JWT is signed with `BUILD_JWT_SECRET` and expires after
-  `BUILD_JWT_TTL_MINUTES` (default 720).
-- Refresh is available at `POST /api/v1/auth/refresh`.
-- Only `super_admin` role can access any Build endpoint outside `auth/*` and
-  the inbound Flow/Console/worker filters.
+Catalog for app_code `build`: `super_admin` (Build Administrator) — the only
+role. Every portal route outside `auth/*` and the inbound
+Flow/Console/worker filters requires it (`role:super_admin`).
+
+**Sign-in** — `GET /v1/auth/sso-callback`, `POST /v1/auth/controller-sso`,
+`POST /v1/auth/console-session` all hand Console's payload to
+`ConsoleRoleSyncService::signIn()`:
+
+| Console payload | Result |
+| --- | --- |
+| `app_roles` contains `super_admin`, or `app_superadmin: true` | role `super_admin`; row created/updated |
+| `app_roles` empty (or only unknown slugs) and not `app_superadmin` | **403** "Access not assigned. Ask a Console superadmin to assign you a role." — no row created; an existing row loses its role and its sessions end |
+| no `app_roles` key (Console before role assignment) | only `global_superadmin: true` gets `super_admin`; everyone else 403 (same message) |
+
+There is no default role anywhere (create, refresh, `/me`). The sync stores
+`console_user_id`, `roles_synced_at`, `authz_version` and the raw
+`console_app_roles` (migration `2026-10-14-000021`).
+
+**Refresh** — `POST /v1/auth/refresh {token}` (the SPA calls it on every
+load) runs `ConsoleRoleSyncService::refresh()`, which pulls
+`GET {CONSOLE_API_URL}/portal/controller-apps/user-access?app_code=build&console_user_id=…`
+(or `&email=`) with `Authorization: Bearer {CONSOLE_API_TOKEN}`:
+
+| Outcome | Result |
+| --- | --- |
+| user-access says not `exists` / not `active` / no `app_access` / no role (and not `app_superadmin`) | **403**, role cleared, `sessions_revoked_at` set — every earlier Build JWT stops working |
+| user-access returns roles | role re-synced, new JWT |
+| Console unreachable / non-2xx / malformed | allowed only if `roles_synced_at` < 12 h ago, else 503 |
+| `CONSOLE_API_URL` or `CONSOLE_API_TOKEN` unset | warning logged, last synced role kept (production must set both) |
+
+**Per request** — `JwtFilter` loads the `build_users` row and uses the
+**stored** role, not the role claim in the token. It refuses (401) tokens for
+inactive users, tokens issued before `sessions_revoked_at`, and tokens for
+rows never synced under these rules (rows from before the migration — those
+users simply sign in again through Console).
+
+JWTs are signed with `BUILD_JWT_SECRET` and expire after
+`BUILD_JWT_TTL_MINUTES` (default 720).
 
 ## 3. Filters (server-php/app/Filters)
 
 | Filter                | Purpose                                                                 |
 | --------------------- | ----------------------------------------------------------------------- |
 | `CorsFilter`          | CORS for `BUILD_ALLOWED_ORIGINS`.                                       |
-| `JwtFilter`           | Decodes bearer JWT, hydrates current user.                              |
+| `JwtFilter`           | Decodes bearer JWT, loads `build_users`, hydrates current user with the stored (Console-synced) role. |
 | `RoleFilter`          | `role:super_admin` — enforced on every portal endpoint.                 |
 | `WorkerAuthFilter`    | `X-Worker-Token` from `BUILD_WORKER_TOKEN` (Playwright callbacks).      |
 | `FlowInboundFilter`   | `Authorization: Bearer` + optional `X-Signature` HMAC (Flow → Build).    |

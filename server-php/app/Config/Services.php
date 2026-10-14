@@ -9,6 +9,8 @@ use App\Services\AuditService;
 use App\Services\BotReportService;
 use App\Services\ConsoleClient;
 use App\Services\ConsoleIdentityService;
+use App\Services\ConsoleRoleSyncService;
+use App\Services\ConsoleUserAccessClient;
 use App\Services\DeploymentRequestService;
 use App\Services\DevRequestWorkflowService;
 use App\Services\FlowInboundService;
@@ -125,6 +127,22 @@ class Services extends BaseService
             return static::getSharedInstance('consoleIdentity') ?? static::consoleIdentity(false);
         }
         return new ConsoleIdentityService();
+    }
+
+    public static function consoleUserAccess(bool $getShared = true): ConsoleUserAccessClient
+    {
+        if ($getShared) {
+            return static::getSharedInstance('consoleUserAccess') ?? static::consoleUserAccess(false);
+        }
+        return new ConsoleUserAccessClient();
+    }
+
+    public static function consoleRoleSync(bool $getShared = true): ConsoleRoleSyncService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('consoleRoleSync') ?? static::consoleRoleSync(false);
+        }
+        return new ConsoleRoleSyncService();
     }
 
     public static function github(bool $getShared = true): GitHubServiceInterface

@@ -18,7 +18,7 @@ deployments, and generates verifiable bot reports.
 | Frontend   | Vite 8 + React 19 + Tailwind 3 + axios + react-router-dom 7 |
 | Backend    | CodeIgniter 4.6 (PHP 8.1+) |
 | Database   | PostgreSQL (`build_*` table prefix) |
-| Auth       | Independent superadmin JWT (`Authorization: Bearer …`) |
+| Auth       | Console SSO → Build JWT (`Authorization: Bearer …`); staff roles assigned in Console |
 | Deploy     | cPanel — SPA to `public_html/`, API to `public_html/api/` |
 | Integrations | GitHub REST v3, Playwright worker (`worker.apis.aicountly.com`), Flow, Console |
 
@@ -72,6 +72,29 @@ build-aicountly/
 11. GitHub / AI / worker tokens **never** leave the PHP process — frontend only sees `configured / not configured` booleans via `/health/integrations`.
 12. Destructive kinds (`file_delete`, `branch_delete`, `force_push`) are enumerated in `SafetyGuardService::DESTRUCTIVE_KINDS` and blocked unless explicitly approved.
 
+## Staff access (roles from Console)
+
+Nobody gets a Build role by signing in. Console assigns roles per app; Build's
+catalog (app_code `build`) has one role, `super_admin` (Build Administrator),
+and every portal route requires it.
+
+- **Sign-in** (SSO exchange / Console-session introspect): Console's
+  `app_roles` set the local role. Empty `app_roles` and not `app_superadmin`
+  → **403 "Access not assigned. Ask a Console superadmin to assign you a
+  role."** An older Console that sends no `app_roles` admits only a Console
+  global superadmin.
+- **Refresh** (`POST /api/v1/auth/refresh`, called by the SPA on every load):
+  re-pulls `user-access` from Console. Revoked → refused, local role cleared,
+  every Build session ended. Console unreachable → allowed only if the role
+  was synced less than 12 h ago.
+- **Production must set `CONSOLE_API_URL` and `CONSOLE_API_TOKEN`** in
+  `server-php/.env`; without them refresh keeps the last synced role and logs
+  a warning.
+
+Details: [docs/architecture.md §2](docs/architecture.md#2-staff-sign-in-and-roles-console).
+Service-to-service paths (Flow handoff, Console approval callback, worker
+results) use their own bearer tokens and are unaffected.
+
 ## Cross-portal integrations
 
 | Direction | Endpoint | Auth | Purpose |
@@ -102,6 +125,18 @@ npm run dev
 ```
 
 Visit http://localhost:5173 and sign in with the seeded superadmin credentials.
+
+### Tests
+
+```bash
+cd server-php
+vendor/bin/phpunit --testsuite unit     # role policy + Console user-access client (HTTP stubbed)
+
+# + database suite: SSO sign-in / refresh / JwtFilter over the CI4 router.
+# Migrates and WIPES the target database — use a throwaway one.
+BUILD_RUN_DB_TESTS=1 database_tests_hostname=127.0.0.1 database_tests_database=build_test \
+  database_tests_username=postgres database_tests_password=postgres vendor/bin/phpunit
+```
 
 ## Documentation
 
