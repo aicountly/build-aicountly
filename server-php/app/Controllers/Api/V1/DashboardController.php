@@ -58,17 +58,12 @@ class DashboardController extends BaseController
         $previous = $settings->getValue('bot_mode', 'confirm');
         $settings->setValue('bot_mode', $mode, $this->currentUserId());
 
+        // Reaches Console through the central audit (bot.* is fanned out).
         Services::auditService()->log('bot.mode_changed', [
             'old_value' => ['bot_mode' => $previous],
             'new_value' => ['bot_mode' => $mode],
             'risk_level' => 'medium',
         ]);
-
-        try {
-            Services::consoleClient()->sendBotModeStatus(['bot_mode' => $mode, 'source' => BUILD_PORTAL_SOURCE]);
-        } catch (\Throwable $e) {
-            log_message('warning', 'Console bot-mode notify failed: ' . $e->getMessage());
-        }
 
         return build_json_success(['bot_mode' => $mode]);
     }

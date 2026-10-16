@@ -49,6 +49,23 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
+  const renewToken = useCallback(async () => {
+    const current = getToken()
+    if (!current) return false
+    try {
+      const { data: body } = await api.post(v1('/auth/refresh'), { token: current })
+      if (!body?.success || !body?.data?.token) {
+        setToken('')
+        return false
+      }
+      setToken(body.data.token)
+      return true
+    } catch {
+      setToken('')
+      return false
+    }
+  }, [])
+
   const loginWithControllerSso = useCallback(async (ssoToken) => {
     const { data: body } = await api.post(v1('/auth/controller-sso'), { token: ssoToken })
     if (!body?.success) throw new Error(body?.message || 'Controller SSO failed')
@@ -83,7 +100,12 @@ export function AuthProvider({ children }) {
     }
 
     if (getToken()) {
-      const ok = await refresh()
+      // Re-check the stored session with the API first: /auth/refresh asks
+      // Console for the user's current Build role (revoked → refused, so we
+      // fall through to the Console-session sign-in below, which shows the
+      // "Access not assigned" gate).
+      const renewed = await renewToken()
+      const ok = renewed && (await refresh())
       if (ok) {
         setLoading(false)
         return
@@ -110,7 +132,7 @@ export function AuthProvider({ children }) {
       setSsoPending(false)
       setLoading(false)
     }
-  }, [loginWithConsoleSession, loginWithControllerSso, refresh])
+  }, [loginWithConsoleSession, loginWithControllerSso, refresh, renewToken])
 
   useEffect(() => {
     bootstrap()

@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class FlowHandoffsModel extends Model
+class FlowHandoffsModel extends BuildModel
 {
     protected $table         = 'build_flow_handoffs';
     protected $primaryKey    = 'id';

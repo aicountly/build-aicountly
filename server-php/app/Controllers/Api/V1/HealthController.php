@@ -44,7 +44,8 @@ class HealthController extends BaseController
         ];
         $console = [
             'configured'  => Services::consoleClient()->isConfigured(),
-            'base_url'    => (string) env('BUILD_CONSOLE_API_BASE_URL', ''),
+            // Central audit (POST {CONSOLE_API_URL}/portal/audit) — the only call Build makes to Console.
+            'base_url'    => (string) (env('CONSOLE_API_URL', '') ?: env('BUILD_CONSOLE_API_BASE_URL', '')),
             'inbound_configured' => (string) env('BUILD_CONSOLE_INBOUND_TOKEN', '') !== '',
         ];
         $flow    = [

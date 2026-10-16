@@ -31,6 +31,8 @@ $optional = [
     'BUILD_CONSOLE_API_TOKEN' => 'Console outbound',
     'BUILD_CONSOLE_INBOUND_TOKEN' => 'Console callback',
     'BUILD_AI_PROVIDER'       => 'AI provider selector',
+    'CONSOLE_API_URL'         => 'Console SSO + staff-role pull',
+    'CONSOLE_API_TOKEN'       => 'Console staff-role pull (user-access) — production must set',
 ];
 
 $ok = true;

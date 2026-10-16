@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class ConsoleSyncsModel extends Model
+class ConsoleSyncsModel extends BuildModel
 {
     protected $table         = 'build_console_syncs';
     protected $primaryKey    = 'id';
@@ -20,7 +18,7 @@ class ConsoleSyncsModel extends Model
     ];
 
     protected array $casts = [
-        'request'  => 'json-array',
-        'response' => 'json-array',
+        'request'  => '?json-array',
+        'response' => '?json-array',
     ];
 }

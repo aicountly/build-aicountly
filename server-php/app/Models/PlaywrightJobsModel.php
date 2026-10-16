@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class PlaywrightJobsModel extends Model
+class PlaywrightJobsModel extends BuildModel
 {
     protected $table         = 'build_playwright_jobs';
     protected $primaryKey    = 'id';
@@ -19,7 +17,7 @@ class PlaywrightJobsModel extends Model
     ];
 
     protected array $casts = [
-        'request'  => 'json-array',
-        'response' => 'json-array',
+        'request'  => '?json-array',
+        'response' => '?json-array',
     ];
 }

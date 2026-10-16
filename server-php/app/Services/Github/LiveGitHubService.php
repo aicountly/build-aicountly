@@ -23,8 +23,17 @@ class LiveGitHubService implements GitHubServiceInterface
     private string $branchPrefix;
     private GithubActivityModel $activity;
 
-    public function __construct()
+    /**
+     * Sends one HTTP request: fn(string $method, string $url, list<string> $headers, ?string $body)
+     * returning array{status: int, body: string|false, error: string}. Curl unless a test injects one.
+     *
+     * @var \Closure(string, string, list<string>, ?string): array{status: int, body: string|false, error: string}
+     */
+    private \Closure $transport;
+
+    public function __construct(?\Closure $transport = null)
     {
+        $this->transport     = $transport ?? self::curlTransport(...);
         $this->token         = (string) env('BUILD_GITHUB_TOKEN', '');
         $this->baseUrl       = rtrim((string) env('BUILD_GITHUB_API_BASE_URL', 'https://api.github.com'), '/');
         $this->defaultBranch = (string) env('BUILD_GITHUB_DEFAULT_BRANCH', 'main');
@@ -211,30 +220,23 @@ class LiveGitHubService implements GitHubServiceInterface
             throw new NotConfiguredException('GitHub token missing.');
         }
 
-        $url = $this->baseUrl . $path;
-        $ch  = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL            => $url,
-            CURLOPT_CUSTOMREQUEST  => $method,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
-            CURLOPT_HTTPHEADER     => [
-                'Accept: application/vnd.github+json',
-                'Authorization: Bearer ' . $this->token,
-                'User-Agent: aicountly-build (build.aicountly.org)',
-                'X-GitHub-Api-Version: 2022-11-28',
-                'Content-Type: application/json',
-            ],
-        ]);
+        $headers = [
+            'Accept: application/vnd.github+json',
+            'Authorization: Bearer ' . $this->token,
+            'User-Agent: aicountly-build (build.aicountly.org)',
+            'X-GitHub-Api-Version: 2022-11-28',
+            'Content-Type: application/json',
+        ];
 
+        $payload = null;
         if ($body !== [] || in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            $payload = json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }
 
-        $resBody = curl_exec($ch);
-        $status  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err     = curl_error($ch);
-        curl_close($ch);
+        $res     = ($this->transport)($method, $this->baseUrl . $path, $headers, $payload);
+        $resBody = $res['body'];
+        $status  = (int) $res['status'];
+        $err     = (string) $res['error'];
 
         if ($err !== '') {
             throw new RuntimeException("GitHub network error: {$err}");
@@ -247,6 +249,32 @@ class LiveGitHubService implements GitHubServiceInterface
         return $resBody === '' ? null : json_decode((string) $resBody, true);
     }
 
+    /**
+     * @param list<string> $headers
+     * @return array{status: int, body: string|false, error: string}
+     */
+    private static function curlTransport(string $method, string $url, array $headers, ?string $body): array
+    {
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL            => $url,
+            CURLOPT_CUSTOMREQUEST  => $method,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
+            CURLOPT_HTTPHEADER     => $headers,
+        ]);
+        if ($body !== null) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        }
+
+        $resBody = curl_exec($ch);
+        $status  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err     = curl_error($ch);
+        curl_close($ch);
+
+        return ['status' => $status, 'body' => $resBody, 'error' => $err];
+    }
+
     private function recordActivity(?int $repoId, ?int $devRequestId, string $kind, string $ref, array $payload): void
     {
         try {
@@ -256,7 +284,7 @@ class LiveGitHubService implements GitHubServiceInterface
                 'kind'           => $kind,
                 'ref'            => $ref,
                 'actor'          => 'build.bot',
-                'payload'        => json_encode($payload),
+                'payload'        => $payload,
                 'created_at'     => date('Y-m-d H:i:s'),
             ]);
         } catch (\Throwable $e) {

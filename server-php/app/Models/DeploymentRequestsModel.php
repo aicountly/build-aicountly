@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class DeploymentRequestsModel extends Model
+class DeploymentRequestsModel extends BuildModel
 {
     protected $table         = 'build_deployment_requests';
     protected $primaryKey    = 'id';
@@ -20,5 +18,5 @@ class DeploymentRequestsModel extends Model
         'provider', 'provider_ref', 'notes', 'metadata',
     ];
 
-    protected array $casts = ['metadata' => 'json-array'];
+    protected array $casts = ['metadata' => '?json-array'];
 }

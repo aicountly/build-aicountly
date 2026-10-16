@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class GithubActivityModel extends Model
+class GithubActivityModel extends BuildModel
 {
     protected $table         = 'build_github_activity';
     protected $primaryKey    = 'id';
@@ -15,5 +13,5 @@ class GithubActivityModel extends Model
         'repo_id', 'dev_request_id', 'kind', 'ref', 'actor', 'payload', 'created_at',
     ];
 
-    protected array $casts = ['payload' => 'json-array'];
+    protected array $casts = ['payload' => '?json-array'];
 }

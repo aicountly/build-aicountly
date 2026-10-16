@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class DevRequestsModel extends Model
+class DevRequestsModel extends BuildModel
 {
     protected $table         = 'build_dev_requests';
     protected $primaryKey    = 'id';
@@ -24,9 +22,9 @@ class DevRequestsModel extends Model
     ];
 
     protected array $casts = [
-        'files_likely_affected' => 'json-array',
-        'files_changed_summary' => 'json-array',
-        'metadata'              => 'json-array',
+        'files_likely_affected' => '?json-array',
+        'files_changed_summary' => '?json-array',
+        'metadata'              => '?json-array',
     ];
 
     public const STATUSES = [

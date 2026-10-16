@@ -83,12 +83,13 @@ class FlowInboundService
             'priority'            => $priority,
             'risk_level'          => (string) env('BUILD_BOT_DEFAULT_RISK', 'medium'),
             'status'              => 'received',
-            'metadata'            => json_encode([
+            // JSON-cast fields take arrays; the model encodes them (see BuildModel).
+            'metadata'            => [
                 'flow_handoff_id' => $flowHandoffId,
                 'source'          => $source,
                 'requested_by'    => (string) ($payload['requested_by'] ?? ''),
                 'raw'             => $payload,
-            ]),
+            ],
         ], true);
 
         $handoffId = (int) $this->handoffs->insert([
@@ -96,7 +97,7 @@ class FlowInboundService
             'source_type'     => (string) ($payload['source_type'] ?? ''),
             'source_id'       => (int) ($payload['source_id'] ?? 0),
             'source_portal'   => $source,
-            'raw_payload'     => json_encode($payload),
+            'raw_payload'     => $payload,
             'dev_request_id'  => $devRequestId,
             'received_at'     => date('Y-m-d H:i:s'),
             'processed_at'    => date('Y-m-d H:i:s'),

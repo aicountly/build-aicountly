@@ -18,7 +18,7 @@ deployments, and generates verifiable bot reports.
 | Frontend   | Vite 8 + React 19 + Tailwind 3 + axios + react-router-dom 7 |
 | Backend    | CodeIgniter 4.6 (PHP 8.1+) |
 | Database   | PostgreSQL (`build_*` table prefix) |
-| Auth       | Independent superadmin JWT (`Authorization: Bearer …`) |
+| Auth       | Console SSO → Build JWT (`Authorization: Bearer …`); staff roles assigned in Console |
 | Deploy     | cPanel — SPA to `public_html/`, API to `public_html/api/` |
 | Integrations | GitHub REST v3, Playwright worker (`worker.apis.aicountly.com`), Flow, Console |
 
@@ -72,13 +72,36 @@ build-aicountly/
 11. GitHub / AI / worker tokens **never** leave the PHP process — frontend only sees `configured / not configured` booleans via `/health/integrations`.
 12. Destructive kinds (`file_delete`, `branch_delete`, `force_push`) are enumerated in `SafetyGuardService::DESTRUCTIVE_KINDS` and blocked unless explicitly approved.
 
+## Staff access (roles from Console)
+
+Nobody gets a Build role by signing in. Console assigns roles per app; Build's
+catalog (app_code `build`) has one role, `super_admin` (Build Administrator),
+and every portal route requires it.
+
+- **Sign-in** (SSO exchange / Console-session introspect): Console's
+  `app_roles` set the local role. Empty `app_roles` and not `app_superadmin`
+  → **403 "Access not assigned. Ask a Console superadmin to assign you a
+  role."** An older Console that sends no `app_roles` admits only a Console
+  global superadmin.
+- **Refresh** (`POST /api/v1/auth/refresh`, called by the SPA on every load):
+  re-pulls `user-access` from Console. Revoked → refused, local role cleared,
+  every Build session ended. Console unreachable → allowed only if the role
+  was synced less than 12 h ago.
+- **Production must set `CONSOLE_API_URL` and `CONSOLE_API_TOKEN`** in
+  `server-php/.env`; without them refresh keeps the last synced role and logs
+  a warning.
+
+Details: [docs/architecture.md §2](docs/architecture.md#2-staff-sign-in-and-roles-console).
+Service-to-service paths (Flow handoff, Console approval callback, worker
+results) use their own bearer tokens and are unaffected.
+
 ## Cross-portal integrations
 
 | Direction | Endpoint | Auth | Purpose |
 |-----------|----------|------|---------|
 | Flow → Build | `POST /api/v1/tasks` **and** `POST /api/v1/internal/flow/build-task` | `Authorization: Bearer FLOW_INBOUND_TOKEN` | Handoff of approved bug/feature (dedup on `flow_handoff_id`) |
 | Console → Build | `POST /api/v1/internal/console/approvals/callback` | `Authorization: Bearer CONSOLE_INBOUND_TOKEN` | Approval decisions replayed into `build_approvals` |
-| Build → Console | 8 event kinds via `CONSOLE_API_BASE_URL` | `Authorization: Bearer CONSOLE_API_TOKEN`, `X-Source: build.aicountly.org` | approval_request, audit_event, bot_report_summary, high_risk_action_request, pr_created, deployment_requested, deployment_status_changed, bot_mode_status, health_status |
+| Build → Console (the only outbound call; the former `/api/v1/portal/build/*` event kinds were removed — [docs/architecture.md](docs/architecture.md#console-what-build-sends-2026-10-14)) | `POST {CONSOLE_API_URL}/portal/audit` | `Authorization: Bearer CONSOLE_API_TOKEN` (Build's own Console key, capability `audit.write`) | audit_event: every `AuditService` action under `CONSOLE_FANOUT_PREFIXES`, sent through the `build_console_syncs` outbox (`external_id` `build:audit_logs:<id>`, Console de-duplicates on it), retried by `php spark console:deliver-audit` (cron every 5 min) until Console has it; The command reports each delivery run to Console's Cron Job Monitor as `build.console_audit_deliver` (`app/Libraries/CronHeartbeat.php`; `CONSOLE_CRON_MONITOR_KEY` in `.env`, console-react-app `docs/CRON_MONITORS.md`); without the key nothing is reported, and a failed report never fails the command. |
 | Build → Worker | `POST {WORKER_BASE_URL}/api/playwright/*` | `Authorization: Bearer WORKER_API_TOKEN` | Screenshot / UI inspection / smoke navigation / visual evidence |
 | Worker → Build | `POST /api/v1/internal/worker/results` | `X-Worker-Token: WORKER_API_TOKEN` | Playwright job results returned to portal |
 
@@ -102,6 +125,35 @@ npm run dev
 ```
 
 Visit http://localhost:5173 and sign in with the seeded superadmin credentials.
+
+### Tests
+
+```bash
+cd server-php
+vendor/bin/phpunit --testsuite unit     # role policy, Console user-access client (HTTP stubbed), JSON cast
+
+# + database suite over the CI4 router: SSO sign-in / refresh / JwtFilter, and
+# JSONB round-trips (Flow handoff POST /v1/tasks, approvals + Console callback,
+# test runner, GitHub activity with HTTP stubbed, Playwright results, settings,
+# repair of double-encoded rows).
+# Migrates and WIPES the target database — use a throwaway one.
+BUILD_RUN_DB_TESTS=1 database_tests_hostname=127.0.0.1 database_tests_database=build_test \
+  database_tests_username=postgres database_tests_password=postgres vendor/bin/phpunit
+```
+
+### Repairing double-encoded JSON
+
+Releases before October 2026 stored some JSONB values twice-encoded (a JSON
+string wrapping the document), which made a valid Flow handoff return 500. The
+API now reads those rows correctly; to clean the stored data:
+
+```bash
+cd server-php
+php spark build:repair-json            # dry run: counts per table.column
+php spark build:repair-json --apply    # rewrite them; safe to re-run
+```
+
+Details: [architecture.md § JSONB columns](docs/architecture.md#jsonb-columns).
 
 ## Documentation
 

@@ -32,6 +32,10 @@ GitHub secret names are identical to reach — see [github-secrets.md](github-se
   - `BUILD_FLOW_INBOUND_TOKEN`, `BUILD_FLOW_HMAC_SECRET` — from Flow.
   - `BUILD_CONSOLE_INBOUND_TOKEN`, `BUILD_CONSOLE_OUTBOUND_URL`,
     `BUILD_CONSOLE_OUTBOUND_TOKEN` — from Console.
+  - `CONSOLE_API_URL`, `CONTROLLER_APP_CODE=build` and **`CONSOLE_API_TOKEN`**
+    (a Console service token with capability `staff.roles`). Required in
+    production: Build takes staff roles from Console and re-checks them on
+    every token refresh — see [architecture.md §2](architecture.md#2-staff-sign-in-and-roles-console).
   - `BUILD_OWNER_EMAIL`, `BUILD_OWNER_NAME`, `BUILD_OWNER_PASSWORD` (or
     `SUPER_ADMIN_*` — same as GitHub secrets; default email `pno@aicountly.com`).
 - Add GitHub Actions secrets — **same names as reach-aicountly** (see
@@ -52,6 +56,21 @@ The workflow will:
    - **Never** ships or overwrites `api/.env` — the workflow backs up the
      existing server `.env` before replacing `api/`, then restores it unchanged.
 5. Run `php spark migrate` and seed the superadmin when `SUPER_ADMIN_*` secrets are set
+
+### One-off after deploying the JSON double-encoding fix (October 2026)
+
+Rows written by earlier releases may hold double-encoded JSON. The API reads
+them correctly already; to repair the stored values, on the server:
+
+```
+cd public_html/api
+php spark build:repair-json            # dry run — lists table.column counts
+php spark build:repair-json --apply    # rewrites only those values; idempotent
+```
+
+Take the usual DB backup first; the command touches only JSONB values that
+are a string wrapping JSON text. Re-running it reports `0`.
+See [architecture.md § JSONB columns](architecture.md#jsonb-columns).
 
 ### First-time admin bootstrap
 

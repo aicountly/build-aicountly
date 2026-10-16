@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Build API tests.
+
+    vendor/bin/phpunit (testsuite unit)          no database, Console stubbed
+    BUILD_RUN_DB_TESTS=1 \
+      database_tests_hostname=127.0.0.1 database_tests_database=build_test \
+      database_tests_username=postgres database_tests_password=postgres \
+      vendor/bin/phpunit                         plus the database suite (migrates a throwaway PostgreSQL DB)
+
+  The database suite migrates and wipes the target database: never point it at a real one.
+-->
+<phpunit
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+    bootstrap="vendor/codeigniter4/framework/system/Test/bootstrap.php"
+    backupGlobals="false"
+    colors="true"
+    columns="max"
+    failOnRisky="true"
+    failOnWarning="true"
+    cacheDirectory="writable/cache/.phpunit.cache"
+>
+    <testsuites>
+        <testsuite name="unit">
+            <directory>./tests/unit</directory>
+        </testsuite>
+        <testsuite name="database">
+            <directory>./tests/database</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory suffix=".php">./app</directory>
+        </include>
+    </source>
+
+    <php>
+        <server name="app.baseURL" value="http://example.com/"/>
+        <server name="CODEIGNITER_SCREAM_DEPRECATIONS" value="0"/>
+        <const name="HOMEPATH" value="./"/>
+        <const name="CONFIGPATH" value="./app/Config/"/>
+        <const name="PUBLICPATH" value="./"/>
+        <env name="BUILD_JWT_SECRET" value="phpunit-only-secret-0123456789abcdef0123456789"/>
+        <env name="CONTROLLER_APP_CODE" value="build"/>
+    </php>
+</phpunit>

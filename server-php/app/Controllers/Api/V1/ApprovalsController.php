@@ -87,22 +87,13 @@ class ApprovalsController extends BaseController
             return build_json_error($e->getMessage(), [], 400);
         }
 
+        // Reaches Console through the central audit (high_risk.* is fanned out).
         Services::auditService()->log('high_risk.override_recorded', [
             'entity_type' => 'dev_request',
             'entity_id'   => (int) $data['dev_request_id'],
             'metadata'    => ['approval_id' => $id, 'reason' => (string) $data['reason']],
             'risk_level'  => 'critical',
         ]);
-
-        try {
-            Services::consoleClient()->sendHighRiskActionRequest([
-                'approval_id'    => $id,
-                'dev_request_id' => (int) $data['dev_request_id'],
-                'reason'         => (string) $data['reason'],
-            ]);
-        } catch (\Throwable $e) {
-            log_message('warning', 'Console high-risk notify failed: ' . $e->getMessage());
-        }
 
         return build_json_success(['approval_id' => $id], 'High-risk override recorded.', 201);
     }

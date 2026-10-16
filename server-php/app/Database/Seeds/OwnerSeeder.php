@@ -44,7 +44,9 @@ class OwnerSeeder extends Seeder
                 'name'          => $name,
                 'password_hash' => $hash,
                 'status'        => 'active',
-                'role'          => 'super_admin',
+                // role is not re-asserted here: Build roles come from Console
+                // (ConsoleRoleSyncService), and a deploy must not undo a
+                // Console revocation.
                 'updated_at'    => date('Y-m-d H:i:s'),
             ]);
             echo "[OwnerSeeder] Updated superadmin credentials: {$email}\n";

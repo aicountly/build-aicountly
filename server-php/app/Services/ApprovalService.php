@@ -10,7 +10,8 @@ use RuntimeException;
  * Handles creation, approval and rejection of Approval rows for the six
  * approval actions: code, commit, pr, staging_deploy, prod_deploy, high_risk_override.
  *
- * Sends every state change through ConsoleClient (Part J).
+ * Every state change is an AuditService action (approval.*), which reaches Console's central
+ * audit; approvals are decided here in Build.
  */
 class ApprovalService
 {
@@ -38,26 +39,21 @@ class ApprovalService
             'entity_id'    => $devRequestId,
             'action'       => $action,
             'status'       => 'pending',
-            'payload'      => json_encode($payload),
+            'payload'      => $payload,
             'requester_id' => $requesterId,
         ], true);
 
+        // The request (and its payload, when small enough for Console's 64 KB metadata limit)
+        // reaches Console through the central audit (approval.* is fanned out).
+        $payloadJson = json_encode($payload);
         Services::auditService()->log('approval.requested', [
             'entity_type' => 'dev_request',
             'entity_id'   => $devRequestId,
-            'metadata'    => ['action' => $action, 'approval_id' => $id],
+            'metadata'    => ['action' => $action, 'approval_id' => $id]
+                + (is_string($payloadJson) && strlen($payloadJson) <= 16384
+                    ? ['payload' => $payload]
+                    : ['payload_omitted_bytes' => is_string($payloadJson) ? strlen($payloadJson) : null]),
         ]);
-
-        try {
-            Services::consoleClient()->sendApprovalRequest([
-                'approval_id'    => $id,
-                'action'         => $action,
-                'dev_request_id' => $devRequestId,
-                'payload'        => $payload,
-            ]);
-        } catch (\Throwable $e) {
-            log_message('warning', 'Console approval request notify failed: ' . $e->getMessage());
-        }
 
         return $id;
     }

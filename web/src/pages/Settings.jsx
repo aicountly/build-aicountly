@@ -50,7 +50,8 @@ export default function Settings() {
 }
 
 function SettingRow({ row, onSave }) {
-  const [v, setV] = useState(typeof row.value_json === 'string' ? row.value_json : JSON.stringify(row.value_json))
+  // The API returns value_json already decoded ("confirm", 4, {...}); show it as JSON so Save round-trips it.
+  const [v, setV] = useState(row.value_json === null || row.value_json === undefined ? '' : JSON.stringify(row.value_json))
 
   return (
     <li className="py-3">

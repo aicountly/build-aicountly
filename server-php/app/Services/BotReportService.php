@@ -27,14 +27,8 @@ class BotReportService
             'bot_name'       => 'build.bot',
         ], $data);
 
-        foreach (['files_accessed','ui_screenshots','plan','code_changes','tests_run',
-                  'errors','approval_history','commit_details','pr_details',
-                  'deployment_details','raw_metadata'] as $jsonField) {
-            if (isset($row[$jsonField]) && is_array($row[$jsonField])) {
-                $row[$jsonField] = json_encode($row[$jsonField]);
-            }
-        }
-
+        // JSON fields (plan, tests_run, raw_metadata, ...) go in as arrays;
+        // BotReportsModel's casts encode them.
         return (int) $this->model->insert($row, true);
     }
 

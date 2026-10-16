@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1;
 
 use App\Controllers\BaseController;
+use App\Filters\JwtFilter;
 use App\Models\UsersModel;
 use App\Services\ConsoleIdentityService;
 use CodeIgniter\HTTP\ResponseInterface;
@@ -23,6 +24,12 @@ class AuthController extends BaseController
         );
     }
 
+    /**
+     * POST /v1/auth/refresh {token} — re-issue a Build JWT after re-checking
+     * the user's roles with Console (user-access pull). Revoked in Console →
+     * refused and every session ended; Console unreachable → allowed only if
+     * the roles were synced < 12 h ago; never a default role.
+     */
     public function refresh(): ResponseInterface
     {
         $data = $this->jsonInput();
@@ -31,13 +38,15 @@ class AuthController extends BaseController
             return build_json_error('Token is required.', ['token' => 'required'], 422);
         }
 
-        $payload = Services::jwt()->decode($token);
+        try {
+            $payload = Services::jwt()->decode($token);
+        } catch (RuntimeException $e) {
+            return build_json_error($e->getMessage(), [], 503);
+        }
         if (! $payload) {
             return build_json_error('Invalid or expired token.', [], 401);
         }
 
-        $email = (string) ($payload['email'] ?? '');
-        $roles = (array) ($payload['roles'] ?? ['super_admin']);
         $userId = (int) ($payload['sub'] ?? 0);
 
         $model = new UsersModel();
@@ -45,12 +54,28 @@ class AuthController extends BaseController
         if (! $user || $user['status'] !== 'active') {
             return build_json_error('User not active.', [], 401);
         }
+        if (JwtFilter::tokenPredatesRevocation($payload, $user)) {
+            return build_json_error('This session has ended. Sign in again from Console.', [], 401);
+        }
 
-        $fresh = Services::jwt()->issue($userId, $email, $roles);
+        $sync = Services::consoleRoleSync()->refresh($user);
+        if (! $sync['ok']) {
+            Services::auditService()->log('auth.refresh_denied', [
+                'actor_id'    => $userId,
+                'actor_email' => (string) $user['email'],
+                'metadata'    => ['status' => $sync['status'], 'message' => $sync['message']],
+            ]);
+
+            return build_json_error($sync['message'], [], $sync['status']);
+        }
+
+        $user  = $sync['user'];
+        $roles = $sync['roles'];
+        $fresh = Services::jwt()->issue($userId, (string) $user['email'], $roles);
 
         return build_json_success(['token' => $fresh, 'user' => [
             'id'    => $userId,
-            'email' => $email,
+            'email' => (string) $user['email'],
             'name'  => (string) $user['name'],
             'roles' => $roles,
         ]], 'Token refreshed.');
@@ -70,13 +95,13 @@ class AuthController extends BaseController
         }
         $model = new UsersModel();
         $user  = $model->find($u['id']) ?? [];
-        $role  = (string) ($user['role'] ?? 'super_admin');
 
         return build_json_success([
             'id'              => (int) ($user['id']    ?? $u['id']),
             'email'           => (string) ($user['email'] ?? $u['email']),
             'name'            => (string) ($user['name']  ?? ''),
-            'roles'           => [$role],
+            'roles'           => UsersModel::rolesOf($user),
+            'roles_synced_at' => $user['roles_synced_at'] ?? null,
             'controller_apps' => $this->controllerAppsForRequest(),
         ]);
     }
@@ -243,43 +268,26 @@ class AuthController extends BaseController
      */
     private function buildSessionFromConsoleIdentity(array $identity, string $auditEvent): array|ResponseInterface
     {
-        $active = (bool) ($identity['active'] ?? false);
-        $global = (bool) ($identity['global_superadmin'] ?? false);
-        if (! $active && ! $global) {
-            return build_json_error('You do not have access to the Build controller app.', [], 403);
-        }
-
         $consoleUser = is_array($identity['user'] ?? null) ? $identity['user'] : [];
-        $email = strtolower(trim((string) ($consoleUser['email'] ?? '')));
-        $name  = trim((string) ($consoleUser['name'] ?? ''));
-        if ($email === '') {
-            return build_json_error('Console identity did not return a user email.', [], 502);
-        }
+        $sync = Services::consoleRoleSync()->signIn($identity, $this->request->getIPAddress());
 
-        $users = new UsersModel();
-        $user  = $users->findByEmail($email);
-        $role  = 'super_admin';
-
-        if (! $user) {
-            $userId = $users->insert([
-                'email'         => $email,
-                'name'          => $name !== '' ? $name : $email,
-                'password_hash' => password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT),
-                'status'        => 'active',
-                'role'          => $role,
+        if (! $sync['ok']) {
+            Services::auditService()->log('auth.access_denied', [
+                'actor_email' => strtolower(trim((string) ($consoleUser['email'] ?? ''))) ?: null,
+                'metadata'    => [
+                    'via'               => $auditEvent,
+                    'status'            => $sync['status'],
+                    'console_user_id'   => (int) ($identity['console_user_id'] ?? ($consoleUser['id'] ?? 0)),
+                    'global_superadmin' => (bool) ($identity['global_superadmin'] ?? false),
+                    'app_roles'         => $identity['app_roles'] ?? null,
+                ],
             ]);
 
-            if (! $userId) {
-                return build_json_error('Could not provision Build user from Console identity.', [], 500);
-            }
-
-            $user = $users->find((int) $userId);
-        } elseif (($user['status'] ?? 'active') !== 'active') {
-            return build_json_error('Build user account is inactive.', [], 403);
+            return build_json_error($sync['message'], [], $sync['status']);
         }
 
-        $role = (string) ($user['role'] ?? $role);
-        $roles = [$role];
+        $user  = $sync['user'];
+        $roles = $sync['roles'];
 
         try {
             $buildToken = Services::jwt()->issue((int) $user['id'], $user['email'], $roles);
@@ -287,19 +295,17 @@ class AuthController extends BaseController
             return build_json_error($e->getMessage(), [], 503);
         }
 
-        $users->update($user['id'], [
-            'last_login_at'   => date('Y-m-d H:i:s'),
-            'last_login_ip'   => $this->request->getIPAddress(),
-            'failed_attempts' => 0,
-        ]);
-
         Services::auditService()->log($auditEvent, [
             'actor_id'    => (int) $user['id'],
             'actor_email' => $user['email'],
-            'actor_role'  => $role,
+            'actor_role'  => $roles[0] ?? null,
             'metadata'    => [
-                'console_user_id'   => (int) ($consoleUser['id'] ?? 0),
-                'global_superadmin' => $global,
+                'console_user_id'   => (int) ($user['console_user_id'] ?? 0),
+                'global_superadmin' => (bool) ($identity['global_superadmin'] ?? false),
+                'app_superadmin'    => (bool) ($sync['decision']['app_superadmin'] ?? false),
+                'roles'             => $roles,
+                'roles_source'      => $sync['decision']['source'] ?? null,
+                'authz_version'     => $user['authz_version'] ?? null,
             ],
         ]);
 

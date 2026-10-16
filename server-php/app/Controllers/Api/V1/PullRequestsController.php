@@ -91,23 +91,17 @@ class PullRequestsController extends BaseController
             'url'       => (string) ($created['html_url'] ?? ''),
         ]);
 
+        // Reaches Console through the central audit (pr.* is fanned out).
         Services::auditService()->log('pr.created', [
             'entity_type' => 'pull_request',
             'entity_id'   => $id,
-            'metadata'    => ['pr_number' => $created['number'] ?? null, 'url' => $created['html_url'] ?? null],
-        ]);
-
-        try {
-            Services::consoleClient()->sendPrCreated([
-                'pr_id'          => $id,
+            'metadata'    => [
+                'pr_number'      => $created['number'] ?? null,
+                'url'            => $created['html_url'] ?? null,
                 'dev_request_id' => (int) $pr['dev_request_id'],
-                'pr_number'      => (int) ($created['number'] ?? 0),
-                'url'            => (string) ($created['html_url'] ?? ''),
                 'repo'           => (string) $repo['repo_code'],
-            ]);
-        } catch (\Throwable $e) {
-            log_message('warning', 'Console pr.created notify failed: ' . $e->getMessage());
-        }
+            ],
+        ]);
 
         Services::devRequestWorkflow()->transition((int) $pr['dev_request_id'], 'pr_created', [
             'actor_kind' => 'bot',

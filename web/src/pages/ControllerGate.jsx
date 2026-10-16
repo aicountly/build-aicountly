@@ -36,13 +36,13 @@ export default function ControllerGate() {
             <>
               <h1 className="text-lg font-semibold text-amber-800">Access not assigned</h1>
               <p className="mt-2 text-sm text-neutral-600">
-                You are signed in to Console, but this account does not have access to the Build controller app.
+                You are signed in to Console, but this account has no Build role assigned.
               </p>
               {gateMessage ? (
                 <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{gateMessage}</div>
               ) : null}
               <p className="mt-3 text-xs text-neutral-500">
-                Ask a Console administrator to grant Build access under Controller App Access, then click Retry.
+                Ask a Console superadmin to assign you a Build role (Build Administrator), then click Retry.
               </p>
             </>
           ) : reason === GATE_ERROR ? (

@@ -30,7 +30,7 @@ class TestRunnerController extends BaseController
             'dev_request_id' => $devRequestId,
             'kind'           => 'test_run',
             'status'         => 'pending',
-            'payload'        => json_encode(['suites' => $suites]),
+            'payload'        => ['suites' => $suites],
         ], true);
 
         Services::devRequestWorkflow()->transition($devRequestId, 'tests_running', [

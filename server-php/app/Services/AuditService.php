@@ -7,7 +7,8 @@ use Config\Services;
 
 /**
  * Append-only audit log writer. Every mutating action must call log().
- * Optionally fans out to Console for the 8 event kinds listed in Part J.
+ * Fans the CONSOLE_FANOUT_PREFIXES actions out to Console's central audit through the
+ * outbox (ConsoleAuditOutbox — retried until Console has them).
  */
 class AuditService
 {
@@ -19,8 +20,9 @@ class AuditService
         'pr.',
         'deployment.',
         'dev_request.',
-        'auth.login',
-        'auth.logout',
+        // Every auth.* event: sign-ins are auth.controller_sso_login / auth.controller_sso_callback /
+        // auth.console_session_login (never plain auth.login), plus logout, refresh and access denials.
+        'auth.',
         'high_risk.',
     ];
 
@@ -57,18 +59,20 @@ class AuditService
                 'entity_type' => $opts['entity_type'] ?? null,
                 'entity_id'   => isset($opts['entity_id']) ? (string) $opts['entity_id'] : null,
                 'risk_level'  => $opts['risk_level']  ?? 'info',
-                'old_value'   => isset($opts['old_value']) ? json_encode($opts['old_value']) : null,
-                'new_value'   => isset($opts['new_value']) ? json_encode($opts['new_value']) : null,
+                // JSON-cast fields: pass the values, AuditLogsModel encodes them.
+                'old_value'   => $opts['old_value'] ?? null,
+                'new_value'   => $opts['new_value'] ?? null,
                 'ip_address'  => method_exists($req, 'getIPAddress') ? $req->getIPAddress() : null,
                 'user_agent'  => method_exists($req, 'getUserAgent') ? substr((string) $req->getUserAgent(), 0, 510) : null,
-                'metadata'    => isset($opts['metadata']) ? json_encode($opts['metadata']) : null,
+                'metadata'    => $opts['metadata'] ?? null,
                 'created_at'  => date('Y-m-d H:i:s'),
             ];
 
-            $this->model->insert($row);
+            $auditId = $this->model->insert($row);
 
             if ($this->shouldFanOut($action)) {
                 try {
+                    // external_id = this build_audit_logs row: Console stores it once however often it is resent.
                     Services::consoleClient()->sendAuditEvent('build.' . $action, [
                         'action'      => $action,
                         'entity_type' => $row['entity_type'],
@@ -76,7 +80,12 @@ class AuditService
                         'risk_level'  => $row['risk_level'],
                         'actor_id'    => $actorId,
                         'actor_email' => $actorEmail,
-                    ]);
+                        'old_value'   => $row['old_value'],
+                        'new_value'   => $row['new_value'],
+                        'ip_address'  => $row['ip_address'],
+                        'user_agent'  => $row['user_agent'],
+                        'metadata'    => $row['metadata'],
+                    ], $auditId ? 'build:audit_logs:' . $auditId : null);
                 } catch (\Throwable $e) {
                     log_message('warning', 'ConsoleClient fanout failed for ' . $action . ': ' . $e->getMessage());
                 }
