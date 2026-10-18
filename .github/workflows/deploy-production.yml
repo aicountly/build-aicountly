@@ -4,8 +4,10 @@ name: Deploy Production via SSH
 #   web/dist/*     →  ${PROD_SFTP_REMOTE_ROOT}/     (typically public_html/)
 #   server-php/*   →  ${PROD_SFTP_REMOTE_ROOT}/api/ (CodeIgniter front controller)
 #
-# api/.env is NEVER deployed from CI and NEVER modified — existing server .env
-# is backed up before api/ is replaced and restored immediately after.
+# api/.env is NEVER deployed from CI — existing server .env is backed up before
+# api/ is replaced and restored immediately after. The one line a deploy writes
+# into it is CONSOLE_CRON_MONITOR_KEY (step "Scheduled jobs", from the repo
+# secret of that name); nothing else in it is touched.
 
 on:
   workflow_dispatch:
@@ -194,6 +196,38 @@ jobs:
             echo 'SUPER_ADMIN_EMAIL / SUPER_ADMIN_PASSWORD secrets not set — skipping seed.'
           fi
           REMOTE
+
+      # --------------------------------------------------------------------
+      # Scheduled jobs (E8-OPS F160 — a docblock cron is not a worker)
+      #
+      # api/bin/ops/post-deploy-jobs.sh ON THE SERVER (ops kit, identical to
+      # console-react-app ops/estate/kit): writes the Cron Job Monitor key
+      # (repo secret CONSOLE_CRON_MONITOR_KEY, sent on STDIN, never an
+      # argument) into api/.env — Console's production refuses the shared
+      # CONSOLE_SERVICE_KEY for heartbeats — then installs
+      # server-php/bin/ops/jobs.txt into the crontab with the same PHP CLI
+      # the migrations above ran with, replacing a hand-pasted
+      # `spark console:deliver-audit` line. The job reports to Console's Cron
+      # Job Monitor (build.console_audit_deliver), so a job that stops shows
+      # up as OVERDUE there.
+      # --------------------------------------------------------------------
+
+      - name: Scheduled jobs (crontab + Cron Job Monitor key)
+        env:
+          CONSOLE_CRON_MONITOR_KEY: ${{ secrets.CONSOLE_CRON_MONITOR_KEY }}
+        run: |
+          set +e
+          printf '%s' "$CONSOLE_CRON_MONITOR_KEY" \
+            | ssh -T cpanel-prod "bash '${DEPLOY_ROOT}/api/bin/ops/post-deploy-jobs.sh' --php=php" \
+            | tee /tmp/jobs.out
+          rc=${PIPESTATUS[1]}
+          set -e
+          case "$rc" in
+            0)  echo "Scheduled jobs installed; heartbeats go to Console's Cron Job Monitor." ;;
+            20) echo "::warning::The jobs are installed, but api/.env has no CONSOLE_CRON_MONITOR_KEY and the repo secret is empty — they run without reporting, so Console shows them OVERDUE. Add the CONSOLE_CRON_MONITOR_KEY repository secret and deploy again." ;;
+            21) echo "::error::The crontab could not be installed on the host (output above). The release is live; the jobs are not scheduled."; exit 1 ;;
+            *)  echo "::error::post-deploy-jobs.sh failed (exit $rc, output above)."; exit 1 ;;
+          esac
 
       # Is the live site really this build, and is its API answering? The host's anti-bot page
       # ("One moment, please...") answers some runner requests with a 200 of its own, which a grep
