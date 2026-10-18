@@ -56,6 +56,18 @@ The workflow will:
    - **Never** ships or overwrites `api/.env` — the workflow backs up the
      existing server `.env` before replacing `api/`, then restores it unchanged.
 5. Run `php spark migrate` and seed the superadmin when `SUPER_ADMIN_*` secrets are set
+6. **Scheduled jobs:** run `api/bin/ops/post-deploy-jobs.sh` on the server (the
+   AICOUNTLY ops kit, identical to console-react-app `ops/estate/kit/bin/ops/`). It
+   writes `CONSOLE_CRON_MONITOR_KEY` (repository secret, sent over SSH on STDIN) into
+   `api/.env` — the only line of `.env` a deploy writes — and installs
+   `server-php/bin/ops/jobs.txt` into the deploy user's crontab (block
+   `aicountly-build jobs`, `flock -n`, log `~/logs/aicountly-build-console-audit-deliver.log`):
+   `php spark console:deliver-audit` every 5 minutes, which reports itself to Console's
+   Cron Job Monitor as `build.console_audit_deliver`. A hand-pasted
+   `spark console:deliver-audit` line is removed, so the job never runs twice. Console's
+   production accepts only this key for heartbeats (not the shared `CONSOLE_SERVICE_KEY`).
+   No secret: a warning (the job runs, Console shows it OVERDUE). Crontab not writable:
+   the deploy fails. Check on the server: `bash public_html/api/bin/ops/install-jobs.sh --check`.
 
 ### One-off after deploying the JSON double-encoding fix (October 2026)
 

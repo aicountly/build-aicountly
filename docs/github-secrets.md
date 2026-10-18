@@ -39,6 +39,7 @@ gh auth login
 | `VITE_APP_NAME` | No — change title | `AICOUNTLY Build` |
 | `SUPER_ADMIN_EMAIL` | Optional | `pno@aicountly.com` |
 | `SUPER_ADMIN_PASSWORD` | Set fresh | *(your password)* |
+| `CONSOLE_CRON_MONITOR_KEY` | No — Build's own | the key Console's `CRON_MONITOR_KEY` / `CRON_MONITOR_KEY_HASH` accepts; the deploy writes it into `api/.env` so `console:deliver-audit` reports to the Cron Job Monitor ([deploy.md](deploy.md) step 6) |
 
 `GITHUB_TOKEN` is automatic — do not create manually.
 
@@ -47,7 +48,7 @@ gh auth login
 ```
 public_html/              ← web/dist/   (React SPA + .htaccess)
 public_html/api/          ← server-php/ (CodeIgniter 4.6 API)
-public_html/api/.env      ← server-only; backed up + restored unchanged every deploy
+public_html/api/.env      ← server-only; backed up + restored every deploy (only CONSOLE_CRON_MONITOR_KEY is written)
 ```
 
 ## publish-github-pages.yml

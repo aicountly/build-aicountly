@@ -1,0 +1,14 @@
+# Scheduled jobs of Build (E8-OPS, F160). Installed into the deploy user's crontab by the production deploy
+# (.github/workflows/deploy-production.yml -> bin/ops/post-deploy-jobs.sh -> bin/ops/install-jobs.sh --apply); check on
+# the server with `bash bin/ops/install-jobs.sh --check`. `php spark console:deliver-audit` reports itself to Console's
+# Cron Job Monitor (build.console_audit_deliver; app/Libraries/CronHeartbeat.php, key CONSOLE_CRON_MONITOR_KEY in
+# api/.env, written by the deploy from the repo secret), so it runs WITHOUT the run-job.php wrapper — wrapping it with
+# --monitor would report every run twice.
+#! app: build
+# CodeIgniter on its Postgre driver: the PHP CLI needs pgsql (not pdo_pgsql).
+#! php-ext: pgsql
+# Replaces the hand-installed line the command's docblock used to give, so the job never runs twice. The spark
+# command name is Build's own (no other product has console:deliver-audit).
+#! legacy-pattern: spark[[:space:]]+console:deliver-audit
+# name                  | schedule    | command (run from the api folder)
+console-audit-deliver   | */5 * * * * | {php} spark console:deliver-audit

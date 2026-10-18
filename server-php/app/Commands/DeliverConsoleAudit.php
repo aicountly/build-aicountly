@@ -14,8 +14,8 @@ use CodeIgniter\CLI\CLI;
  * audit_event, status pending, due) to POST {CONSOLE_API_URL}/portal/audit in batches of 100.
  * Events are normally delivered the moment they happen; this retries the rest with back-off.
  *
- * Cron (every 5 minutes):
- *   0,5,10,15,20,25,30,35,40,45,50,55 * * * * cd /path/to/api && php spark console:deliver-audit >> writable/logs/console_audit.log 2>&1
+ * Cron (every 5 minutes): scheduled by the production deploy from bin/ops/jobs.txt (docs/deploy.md step 6) — not
+ * pasted into cPanel by hand.
  */
 class DeliverConsoleAudit extends BaseCommand
 {
