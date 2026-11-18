@@ -92,127 +92,53 @@ jobs:
           EOF
           chmod 600 ~/.ssh/config
 
-      - name: Resolve document root (public_html)
+      - name: Publish the single reviewed HTTPS rewrite and verify the production notice
+        shell: bash
         run: |
           set -euo pipefail
-          ROOT="${REMOTE_ROOT:-public_html}"
-          ROOT="${ROOT%/}"
-          if [ -z "$ROOT" ] || [ "$ROOT" = "auto" ]; then
-            ROOT="public_html"
-          fi
-          echo "DEPLOY_ROOT=${ROOT}" >> "$GITHUB_ENV"
-          echo "Deploy layout: web/dist → ${ROOT}/ | server-php → ${ROOT}/api/"
-          ssh -T cpanel-prod "mkdir -p '${ROOT}/api/writable/'{logs,cache,session,uploads}; echo 'public_html:'; ls -la '${ROOT}' | head -15"
-
-      - name: Deploy SPA (web/dist → public_html)
-        run: |
+          test "$(sha256sum web/public/.htaccess | cut -d' ' -f1)" = 257412e9e8d1f55adcb4a732ece39cf4bb01aa678c06db5da1c41ec6c1267ac8
+          remote=(ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes cpanel-prod)
+          apply() {
+            {
+              printf 'operation=%q\n' "$1"
+              printf 'payload=%q\n' "$(base64 -w0 web/public/.htaccess)"
+              cat <<'REMOTE'
           set -euo pipefail
-          echo "Uploading web/dist → ${DEPLOY_ROOT}/ (public_html)..."
-          timeout 600 scp -r -F "$HOME/.ssh/config" -o BatchMode=yes \
-            web/dist/. "cpanel-prod:${DEPLOY_ROOT}/"
-          ssh -T cpanel-prod "test -f '${DEPLOY_ROOT}/index.html'"
-          echo "index.html confirmed in ${DEPLOY_ROOT}/"
-
-      - name: Deploy API (server-php → public_html/api)
-        run: |
-          set -euo pipefail
-          echo "Packaging server-php/ as api/ (includes vendor/ from CI composer install)..."
-          tar -C server-php \
-            --exclude='./.env' \
-            --exclude='./.git' \
-            --exclude='./writable/logs' \
-            --exclude='./writable/cache' \
-            --exclude='./writable/session' \
-            --exclude='./writable/uploads' \
-            -czf api.tgz .
-          ls -lh api.tgz
-          timeout 600 scp -F "$HOME/.ssh/config" -o BatchMode=yes \
-            api.tgz "cpanel-prod:${DEPLOY_ROOT}/api.tgz"
-          echo "Extracting into ${DEPLOY_ROOT}/api/ ..."
-          ssh -T cpanel-prod "set -e
-            cd '${DEPLOY_ROOT}'
-            test -f api.tgz
-            PRESERVE_ENV='.build-api.env.preserve'
-            if [ -f api/.env ]; then
-              cp -a api/.env \"\$PRESERVE_ENV\"
-              echo 'Backed up api/.env — deploy will not modify production secrets'
-            fi
-            rm -rf api.staging
-            mkdir -p api.staging/writable/logs api.staging/writable/cache api.staging/writable/session api.staging/writable/uploads
-            if tar -xzf api.tgz -C api.staging; then
-              echo 'Extracted with tar -xzf'
-            elif gzip -dc api.tgz | tar -xf - -C api.staging; then
-              echo 'Extracted with gzip | tar'
-            else
-              echo 'ERROR: Could not extract api.tgz on server'
-              exit 1
-            fi
-            rm -f api.staging/.env 2>/dev/null || true
-            rm -rf api
-            mv api.staging api
-            if [ -f \"\$PRESERVE_ENV\" ]; then
-              cp -a \"\$PRESERVE_ENV\" api/.env
-              rm -f \"\$PRESERVE_ENV\"
-              chmod 600 api/.env 2>/dev/null || true
-              echo 'Restored api/.env unchanged — deploy did not modify .env'
-            fi
-            rm -f api.tgz
-            test -f api/index.php || { echo 'ERROR: api/index.php missing'; exit 1; }
-            test -f api/.htaccess || { echo 'ERROR: api/.htaccess missing'; exit 1; }
-            test -f api/.env || { echo 'ERROR: api/.env missing after deploy — create on server before re-running'; exit 1; }
-            ls -la api | head -20"
-          echo "server-php deployed as ${DEPLOY_ROOT}/api/"
-
-      - name: Migrate database and seed superadmin
-        timeout-minutes: 15
-        env:
-          SUPER_ADMIN_EMAIL: ${{ secrets.SUPER_ADMIN_EMAIL }}
-          SUPER_ADMIN_PASSWORD: ${{ secrets.SUPER_ADMIN_PASSWORD }}
-        run: |
-          set -euo pipefail
-          escaped_email=$(printf '%s' "$SUPER_ADMIN_EMAIL" | sed "s/'/'\"'\"'/g")
-          escaped_pass=$(printf '%s' "$SUPER_ADMIN_PASSWORD" | sed "s/'/'\"'\"'/g")
-          timeout 840 ssh -T cpanel-prod bash <<REMOTE
-          set -e
-          cd '${DEPLOY_ROOT}/api'
-          test -d vendor/codeigniter4/framework || { echo 'ERROR: vendor/ missing on server — CI should bundle composer output'; exit 1; }
-          mkdir -p writable/cache writable/session writable/logs writable/uploads
-          chmod -R 775 writable/cache writable/session writable/logs writable/uploads 2>/dev/null || \
-            chmod -R 777 writable/cache writable/session writable/logs writable/uploads
-          if [ ! -f .env ]; then
-            echo 'ERROR: missing api/.env on server — create from .env.example before deploy'
-            exit 1
-          fi
-          echo 'api/.env present — deploy does not modify server secrets'
-          php spark migrate --no-interaction
-          if [ -n '${escaped_email}' ] && [ -n '${escaped_pass}' ]; then
-            export SUPER_ADMIN_EMAIL='${escaped_email}'
-            export SUPER_ADMIN_PASSWORD='${escaped_pass}'
-            export SUPER_ADMIN_NAME='Build Superadmin'
-            php spark db:seed OwnerSeeder --no-interaction
+          umask 077
+          test "$(id -un)" = buildaicountly
+          cd "$HOME/public_html"
+          [[ -f .htaccess && ! -L .htaccess && -O .htaccess ]]
+          backup="$HOME/.htaccess-before-https-20261118-51d4c7393c3a96e07dac7d1cb3264f0d07d38c77595834a4bbebc1f438b67517"
+          if [ "$operation" = install ]; then
+            test "$(sha256sum .htaccess | cut -d' ' -f1)" = 51d4c7393c3a96e07dac7d1cb3264f0d07d38c77595834a4bbebc1f438b67517
+            if [ ! -e "$backup" ]; then (set -C; cat .htaccess > "$backup"); fi
+            [[ -f "$backup" && ! -L "$backup" && -O "$backup" ]]
+            test "$(sha256sum "$backup" | cut -d' ' -f1)" = 51d4c7393c3a96e07dac7d1cb3264f0d07d38c77595834a4bbebc1f438b67517
+            want=257412e9e8d1f55adcb4a732ece39cf4bb01aa678c06db5da1c41ec6c1267ac8; existing=51d4c7393c3a96e07dac7d1cb3264f0d07d38c77595834a4bbebc1f438b67517
           else
-            echo 'SUPER_ADMIN_EMAIL / SUPER_ADMIN_PASSWORD secrets not set — skipping seed.'
+            test "$operation" = restore
+            [[ -f "$backup" && ! -L "$backup" && -O "$backup" ]]
+            want=51d4c7393c3a96e07dac7d1cb3264f0d07d38c77595834a4bbebc1f438b67517; existing=257412e9e8d1f55adcb4a732ece39cf4bb01aa678c06db5da1c41ec6c1267ac8
           fi
+          tmp=$(mktemp .htaccess.https-XXXXXX)
+          trap 'rm -f -- "$tmp"' EXIT
+          cp --preserve=all -- .htaccess "$tmp"
+          if [ "$operation" = install ]; then printf '%s' "$payload" | base64 -d > "$tmp"; else cat "$backup" > "$tmp"; fi
+          test "$(sha256sum "$tmp" | cut -d' ' -f1)" = "$want"
+          test "$(stat -c '%u:%g:%a' "$tmp")" = "$(stat -c '%u:%g:%a' .htaccess)"
+          test "$(sha256sum .htaccess | cut -d' ' -f1)" = "$existing"
+          mv -f -- "$tmp" .htaccess
           REMOTE
-
-      - name: Verify site, API, and login endpoint
-        run: |
-          set -euo pipefail
-          echo "Checking homepage (public_html/index.html)..."
-          curl -fsS "https://${SITE_HOST}/" | grep -qi '<html'
-          echo "Homepage OK"
-          echo "Checking API health (public_html/api/health)..."
-          curl -fsS "https://${SITE_HOST}/api/health" | grep -q 'aicountly-build-api'
-          echo "API health OK"
-          echo "Checking login route (expect JSON, not HTML)..."
-          LOGIN_CODE="$(curl -sS -o /tmp/login.json -w '%{http_code}' \
-            -X POST "https://${SITE_HOST}/api/v1/auth/login" \
-            -H 'Content-Type: application/json' \
-            -d '{"email":"probe@example.com","password":"probe"}')"
-          head -c 200 /tmp/login.json
-          echo ""
-          grep -qE '"success"|"message"|aicountly-build-api' /tmp/login.json || {
-            echo "ERROR: Login endpoint returned HTML instead of JSON (HTTP ${LOGIN_CODE})."
-            exit 1
+            } | "${remote[@]}" 'bash -s'
           }
-          echo "Login route OK (HTTP ${LOGIN_CODE})"
+          apply install
+          verify() {
+            local response code
+            for path in / /index.html; do
+              response=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code} %{redirect_url}' "http://build.aicountly.org$path") || return 1
+              test "$response" = "301 https://build.aicountly.org$path" || return 1
+            done
+            code=$(curl -sS --max-time 20 -o "$RUNNER_TEMP/https-notice-page" -w '%{http_code}' https://build.aicountly.org/) || return 1
+            test "$code" = 200 && grep -q 'maintenance-notice-20261118' "$RUNNER_TEMP/https-notice-page"
+          }
+          if ! verify; then apply restore; exit 1; fi
