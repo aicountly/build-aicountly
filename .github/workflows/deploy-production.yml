@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   deploy:
-    name: Build and deploy to cPanel
+    name: Build and deploy to S01
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -33,6 +33,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Verify S01 deployment target
+        id: s01_target
+        env:
+          AIC_S01_TARGETS: '[{"domain":"build.aicountly.org","account":"buildaicountly","root":"/home/buildaicountly/public_html","verified_blueprint":true,"ssh_login":"aicdaee29172f791a24a"}]'
+          AIC_TARGET_PROD_SFTP_HOST: ${{ secrets.PROD_SFTP_HOST }}
+          AIC_TARGET_PROD_SFTP_PORT: ${{ secrets.PROD_SFTP_PORT }}
+          AIC_TARGET_PROD_SFTP_REMOTE_ROOT: ${{ secrets.PROD_SFTP_REMOTE_ROOT }}
+          AIC_TARGET_PROD_SFTP_USER: ${{ secrets.PROD_SFTP_USER }}
+        run: python3 "$GITHUB_WORKSPACE/.github/scripts/s01-target-guard.py"
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -82,7 +92,7 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          python3 "$GITHUB_WORKSPACE/.github/scripts/s01-keyscan.py" -p "$SSH_PORT" -H "$SSH_HOST" > ~/.ssh/known_hosts 2>/dev/null || { echo "::error::S01 host-key verification failed."; exit 1; }
           cat >> ~/.ssh/config <<EOF
           Host cpanel-prod
             HostName ${SSH_HOST}
@@ -218,6 +228,7 @@ jobs:
       # --------------------------------------------------------------------
 
       - name: Scheduled jobs (crontab + Cron Job Monitor key)
+        if: ${{ vars.S01_WEB_ONLY == '0' }}
         env:
           CONSOLE_CRON_MONITOR_KEY: ${{ secrets.CONSOLE_CRON_MONITOR_KEY }}
         run: |
@@ -228,7 +239,7 @@ jobs:
           rc=${PIPESTATUS[1]}
           set -e
           case "$rc" in
-            0)  echo "Scheduled jobs installed; heartbeats go to Console's Cron Job Monitor." ;;
+            0)  echo "Scheduled-job hook completed; see its output above for installed or deferred status." ;;
             20) echo "::warning::The jobs are installed, but api/.env has no CONSOLE_CRON_MONITOR_KEY and the repo secret is empty — they run without reporting, so Console shows them OVERDUE. Add the CONSOLE_CRON_MONITOR_KEY repository secret and deploy again." ;;
             21) echo "::error::The crontab could not be installed on the host (output above). The release is live; the jobs are not scheduled."; exit 1 ;;
             *)  echo "::error::post-deploy-jobs.sh failed (exit $rc, output above)."; exit 1 ;;
