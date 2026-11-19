@@ -31,6 +31,11 @@
 # Safe to run again: the block is replaced, never duplicated, and an unchanged crontab is not rewritten.
 # `flock -n` skips a run rather than stack overlapping runs (every job is also re-entrant).
 set -euo pipefail
+# The S01 deployment broker holds background work until a separate verified release.
+if [ "${AICOUNTLY_S01_WEB_ONLY:-0}" = "1" ]; then
+  echo "S01: scheduled jobs remain deferred; no cron or first-run job was changed."
+  exit 0
+fi
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 apply=0 remove=0 check=0 php_bin="" log_dir="${HOME}/logs" lock_dir="${HOME}/.aicountly-locks"
@@ -69,8 +74,8 @@ if [ "$remove" -eq 0 ]; then
   # A bare name (--php=php, as a post-deploy hook resolves it) becomes the full path cron needs.
   case "$php_bin" in */* | '') ;; *) php_bin="$(command -v "$php_bin" 2>/dev/null || true)" ;; esac
   if [ -z "$php_bin" ]; then
-    for c in /opt/cpanel/ea-php84/root/usr/bin/php /opt/cpanel/ea-php83/root/usr/bin/php \
-             /opt/cpanel/ea-php82/root/usr/bin/php /opt/cpanel/ea-php81/root/usr/bin/php \
+    for c in /opt/remi/php84/root/usr/bin/php /opt/remi/php83/root/usr/bin/php \
+             /opt/remi/php82/root/usr/bin/php /opt/remi/php81/root/usr/bin/php \
              /usr/local/bin/php /usr/bin/php "$(command -v php 2>/dev/null || true)"; do
       # php -m captured first: `php -m | grep -q` under pipefail can fail on SIGPIPE (see release.sh).
       if [ -n "$c" ] && [ -x "$c" ] && mods="$("$c" -m 2>/dev/null)" && printf '%s\n' "$mods" | grep -qix "$php_ext"; then php_bin="$c"; break; fi
