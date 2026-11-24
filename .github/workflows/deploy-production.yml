@@ -201,12 +201,15 @@ jobs:
             exit 1
           fi
           echo 'api/.env present — deploy does not modify server secrets'
-          php spark migrate --no-interaction
+          # No php on PATH in S01's deploy sandbox: find-php.sh names the interpreter (PHP >= 8.1 with pgsql).
+          PHP="\$(bash bin/ops/find-php.sh </dev/null)" || exit 1
+          echo "--- PHP: \$PHP ---"
+          "\$PHP" spark migrate --no-interaction
           if [ -n '${escaped_email}' ] && [ -n '${escaped_pass}' ]; then
             export SUPER_ADMIN_EMAIL='${escaped_email}'
             export SUPER_ADMIN_PASSWORD='${escaped_pass}'
             export SUPER_ADMIN_NAME='Build Superadmin'
-            php spark db:seed OwnerSeeder --no-interaction
+            "\$PHP" spark db:seed OwnerSeeder --no-interaction
           else
             echo 'SUPER_ADMIN_EMAIL / SUPER_ADMIN_PASSWORD secrets not set — skipping seed.'
           fi
@@ -233,8 +236,10 @@ jobs:
           CONSOLE_CRON_MONITOR_KEY: ${{ secrets.CONSOLE_CRON_MONITOR_KEY }}
         run: |
           set +e
+          # The crontab gets the absolute PHP path find-php.sh names (S01 has no php on PATH);
+          # its stdin is /dev/null so it cannot take the monitor key meant for post-deploy-jobs.sh.
           printf '%s' "$CONSOLE_CRON_MONITOR_KEY" \
-            | ssh -T cpanel-prod "bash '${DEPLOY_ROOT}/api/bin/ops/post-deploy-jobs.sh' --php=php" \
+            | ssh -T cpanel-prod "cd '${DEPLOY_ROOT}/api' && PHP=\"\$(bash bin/ops/find-php.sh </dev/null)\" && bash bin/ops/post-deploy-jobs.sh --php=\"\$PHP\"" \
             | tee /tmp/jobs.out
           rc=${PIPESTATUS[1]}
           set -e

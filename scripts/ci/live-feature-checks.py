@@ -63,7 +63,8 @@ def handoff_and_repair(r: lv.Report) -> None:
     if not lv.env("VERIFY_SSH") or not api_dir:
         r.skip("Build repair-json dry run", "VERIFY_SSH / BUILD_API_DIR not set")
         return
-    code, out, err = lv.on_server(f"cd {shlex.quote(api_dir)} && php spark build:repair-json 2>&1")
+    # S01 has no php on PATH; bin/ops/find-php.sh names the interpreter.
+    code, out, err = lv.on_server(f"cd {shlex.quote(api_dir)} && PHP=\"$(bash bin/ops/find-php.sh </dev/null)\" && \"$PHP\" spark build:repair-json 2>&1")
     m = re.search(r"Dry run: (\d+) double-encoded", out)
     if code != 0 or not m:
         r.fail("Build repair-json dry run", f"exit {code}: {' '.join((out or err).split())[:200]}")
